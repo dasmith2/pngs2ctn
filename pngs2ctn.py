@@ -16,15 +16,14 @@ is probably more like min([abs(a.x - b.x), abs(a.y - b.y)]). Run a script over
 the sample CTNs and see what the maximum x delta, y delta, and cartesian delta
 are.
 
-TODO: It looks like some of these don't connect all the way. Test that I'm
-getting distances like I expect.
+TODO: It looks like some of these connectors aren't connecting all the way.
+Test that I'm getting distances like I expect.
 
 TODO: See if a too-large gap is what caused my squiggle to truncate.
 
 python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
 from collections import namedtuple
-from itertools import izip, chain
 from optparse import OptionParser
 from PIL import Image, ImageDraw
 import random
@@ -44,23 +43,20 @@ class CTN:
 
   def write(self, output_file):
     out = open(output_file, "w")
-    out.write(self.header_boilerplate())
+    out.write(self._header_boilerplate())
     for frame in self.frames():
       out.write(frame.get_bytes())
-    out.write(self.footer_boilerplate())
+    out.write(self._footer_boilerplate())
 
-  def header_boilerplate(self):
+  def _header_boilerplate(self):
     header = bytearray()
     header.extend((0,) * 8)
     return header
 
-  def footer_boilerplate(self):
+  def _footer_boilerplate(self):
     footer = bytearray()
     footer.extend((0,) * 8)
     return footer
-
-
-Point = namedtuple('Point', ['x', 'y', 'color'])
 
 
 Coord = namedtuple('Coord', ['x', 'y'])
@@ -157,22 +153,22 @@ class CTNFrame:
 
   def load_from_png(self, input_file):
     self._load_png(input_file)
-    self.find_features()
-    self.sort_and_connect_features()
+    self._find_features()
+    self._sort_and_connect_features()
 
   def _load_png(self, input_file):
     self.image = Image.open(input_file)
     self.image_width, self.image_height = self.image.size
     self.max_image_dimention = max(self.image.size)
 
-  def find_features(self):
+  def _find_features(self):
     seen_border = Set()
     last_position = None
     for y in range(self.image_height):
       for x in range(self.image_width):
         at = Coord(x, y)
-        if not at in seen_border and self.is_border(at):
-          seen_pixels, draw_coords = self.compute_feature(at)
+        if not at in seen_border and self._is_border(at):
+          seen_pixels, draw_coords = self._compute_feature(at)
           for pixel in seen_pixels:
             seen_border.add(pixel)
           self.features.append(Feature(255, draw_coords))
@@ -206,8 +202,8 @@ class CTNFrame:
       feature_copy.remove(on)
     return shuffled
 
-  def sort_and_connect_features(self):
-    """ You want to minimized the time moving the laser between features.
+  def _sort_and_connect_features(self):
+    """ You want to minimize the time moving the laser between features.
     This is basically traveling salesman, so just poke around for a while
     and take the best path we can find. Start with a sane feature ordering
     where you pick one at random, and greedily add the closest feature one at
@@ -224,11 +220,11 @@ class CTNFrame:
     feature_count = len(self.features)
     for start_fresh in range(5):
       feature_copy = self._sane_feature_shuffle(self.features)
-      current_d, current_connectors = self.laser_gap_distance(feature_copy)
+      current_d, current_connectors = self._laser_gap_distance(feature_copy)
       for delta in range(1, 5):
         for i in range(feature_count - delta):
           self._swap_features(feature_copy, i, i + delta)
-          new_d, new_connectors = self.laser_gap_distance(feature_copy)
+          new_d, new_connectors = self._laser_gap_distance(feature_copy)
           if new_d < current_d:
             making_progress = True
             current_d = new_d
@@ -248,8 +244,6 @@ class CTNFrame:
     features[to] = t
 
   def _features_with_connectors(self, connectors):
-    """ TODO: It's stupid that connectors is passed while features is a
-    property. """
     features_with_connectors = []
     if len(connectors) == 0:
       if len(self.features) == 1:
@@ -264,10 +258,9 @@ class CTNFrame:
       features_with_connectors += [Feature(feature.color, new_feature_points), Feature(0, connector_points)]
     return features_with_connectors
 
-  def laser_gap_distance(self, feature_list):
+  def _laser_gap_distance(self, feature_list):
     """ Use this to help us sort the features so the laser has to travel a
-    reasonably not-stupid distance.
-    TODO: A bunch of functions ought to be 'private'. """
+    reasonably not-stupid distance. """
     if len(feature_list) == 0:
       raise Exception("Extected a non-zero feature list")
     if len(feature_list) == 1:
@@ -310,36 +303,36 @@ class CTNFrame:
         min_d = next_d
     return min_fpoint, min_d
 
-  def is_border(self, at):
-    if self.is_white(at):
+  def _is_border(self, at):
+    if self._is_white(at):
       return False
     for check in Go.adjacent_4(at):
-      if not self.is_valid(check) or self.is_white(check):
+      if not self._is_valid(check) or self._is_white(check):
         return True
     return False
 
-  def is_white(self, at):
+  def _is_white(self, at):
     # A pixel can have 3 or 4 values depending on whether there's an alpha
     # chanel.
     return all([chanel == 255 for chanel in self.image.getpixel(at)])
 
-  def is_valid(self, at):
+  def _is_valid(self, at):
     return at.x >= 0 and at.x < self.image_width and at.y >= 0 \
            and at.y < self.image_height
 
-  def pixel_to_draw(self, at):
+  def _pixel_to_draw(self, at):
     return Coord(
         at.x * 1.0 / self.max_image_dimention,
         at.y * 1.0 / self.max_image_dimention)
 
-  def compute_feature(self, at):
+  def _compute_feature(self, at):
     """ Walk around the outside of a non-white blob. Pretend you have your back
     to the feature, and outward keeps track of which direction your face is
     pointed. Keep moving to your right, adding points until you go all the way
     around to where you're about to draw the same point again. """
     for go in directions:
       looking_at = Go.next(at, go)
-      if not self.is_valid(looking_at) or self.is_white(looking_at):
+      if not self._is_valid(looking_at) or self._is_white(looking_at):
         outward = go
         break
     draw_coords = [] # The coords the laser projector should draw.
@@ -354,7 +347,7 @@ class CTNFrame:
         draw_y += 1
       if outward in (Go.UP_RIGHT, Go.RIGHT, Go.DOWN_RIGHT):
         draw_x += 1
-      next_draw_coord = self.pixel_to_draw(Coord(draw_x, draw_y))
+      next_draw_coord = self._pixel_to_draw(Coord(draw_x, draw_y))
       # If we started on a pointy bit, when we come back around to the very
       # first pixel it'll get a second draw_coord. Hence, we often will not
       # notice we're repeating unless we also pay attention to the second
@@ -368,16 +361,16 @@ class CTNFrame:
       for go_offset in range(len(directions)):
         looking_around = (outward + go_offset) % len(directions)
         looking_at = Go.next(at, looking_around)
-        if self.is_valid(looking_at) and not self.is_white(looking_at):
+        if self._is_valid(looking_at) and not self._is_white(looking_at):
           # To compute the new outward, look back where we came from, and
           # rotate once to the right.
           looking_back = Go.direction_from_to(looking_at, at)
           outward = (looking_back + 1) % len(directions)
           at = looking_at
           break
-    return seen_pixels, self.spread_out_draw_coords(draw_coords)
+    return seen_pixels, self._spread_out_draw_coords(draw_coords)
 
-  def spread_out_draw_coords(self, draw_coords):
+  def _spread_out_draw_coords(self, draw_coords):
     self.max_step_size
     i = 0
     return_draw_coords = []
@@ -424,21 +417,21 @@ class CTNFrame:
 
   def get_bytes(self):
     bytes = bytearray()
-    self.append_header(bytes)
-    self.append_body(bytes)
+    self._append_header(bytes)
+    self._append_body(bytes)
     return bytes
 
-  def append_header(self, bytes):
+  def _append_header(self, bytes):
     pass
 
-  def append_body(self, bytes):
+  def _append_body(self, bytes):
     for point in points:
-      append_double_byte(bytes, point.x)
-      append_double_byte(bytes, point.y)
-      append_double_byte(0)
-      append_double_byte(bytes, point.color)
+      self._append_double_byte(bytes, point.x)
+      self._append_double_byte(bytes, point.y)
+      self._append_double_byte(0)
+      self._append_double_byte(bytes, point.color)
 
-  def append_double_byte(self, bytes, my_int):
+  def _append_double_byte(self, bytes, my_int):
     bytes.append(my_int / 256)
     bytes.append(my_int % 256)
 
@@ -480,20 +473,20 @@ def debug_sort_and_connect_features():
     points = [
         Coord(coord.x, coord.y), Coord(coord.x + .08, coord.y),
         Coord(coord.x + .08, coord.y + .08), Coord(coord.x, coord.y + .08)]
-    return Feature(255, frame.spread_out_draw_coords(points))
+    return Feature(255, frame._spread_out_draw_coords(points))
   frame.features = [
       square_at(Coord(.1, .1)), square_at(Coord(.8, .2)),
       square_at(Coord(.15, .3)), square_at(Coord(.85, .4))]
-  frame.sort_and_connect_features()
+  frame._sort_and_connect_features()
   frame.write_debug("debug.png")
 
 
 def debug_find_features():
   frame = CTNFrame()
   frame._load_png("complex.png")
-  frame.find_features()
+  frame._find_features()
 
-  current_d, current_connectors = frame.laser_gap_distance(frame.features)
+  current_d, current_connectors = frame._laser_gap_distance(frame.features)
 
   frame.write_debug("debug.png")
 
