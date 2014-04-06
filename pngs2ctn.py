@@ -9,12 +9,6 @@ you move right. The minimum x or y is -32768 and the maximum is 32768. So for
 example the point (-32768, -32768) is in the lower left corner in the CTN
 format..
 
-TODO: I'm calculating the distance between a and b as cartesian, a.k.a.
-((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** .5. But x and y are controlled with
-completely separate mirrors. So as far as the machine is concerned, distance
-is probably more like min([abs(a.x - b.x), abs(a.y - b.y)]). Run a script over
-the sample CTNs and see what the maximum x delta, y delta, and cartesian delta
-are.
 
 TODO: It looks like some of these connectors aren't connecting all the way.
 Test that I'm getting distances like I expect.
@@ -32,6 +26,15 @@ import sys
 
 
 random.seed("There's no love like your love.")
+
+
+""" TODO: I'm calculating the distance between a and b as cartesian, a.k.a.
+((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** .5. But x and y are controlled with
+completely separate mirrors. So as far as the machine is concerned, distance
+is probably more like min([abs(a.x - b.x), abs(a.y - b.y)]). Run a script over
+the sample CTNs and see what the maximum x delta, y delta, and cartesian delta
+are. """
+MAX_STEP_SIZE = 5.0 / 500.0
 
 
 class CTN:
@@ -123,8 +126,6 @@ Feature = namedtuple('Feature', ['color', 'points'])
 class CTNFrame:
   def __init__(self):
     self.features = []
-    # TODO: Test to find out what this actualy is.
-    self.max_step_size = 5.0 / 500.0
 
   def write_debug(self, file_name):
     debug_size = 750
@@ -155,6 +156,16 @@ class CTNFrame:
     self._load_png(input_file)
     self._find_features()
     self._sort_and_connect_features()
+
+  def max_point_to_point(self):
+    last_point = None
+    max_d = 0.0
+    for feature in self.features:
+      for point in feature.points:
+        if last_point:
+          max_d = max(max_d, self._point_to_point(last_point, point))
+        last_point = point
+    return max_d
 
   def _load_png(self, input_file):
     self.image = Image.open(input_file)
@@ -188,11 +199,11 @@ class CTNFrame:
       min_next_feature_point = None
       for feature2 in feature_copy:
         if last_point:
-          next_feature_point, next_d = self._laser_distance_point_to_feature(
+          next_feature_point, next_d = self._point_to_feature(
               last_point, feature2)
         else:
           throw_away, next_feature_point, next_d = \
-              self._laser_distance_feature_to_feature(on, feature2)
+              self._feature_to_feature(on, feature2)
         if next_d < min_next_d:
           min_next_feature = feature2
           min_next_d = next_d
@@ -265,39 +276,39 @@ class CTNFrame:
       raise Exception("Extected a non-zero feature list")
     if len(feature_list) == 1:
       return 0.0, []
-    min_f1point, min_f2point, min_d = self._laser_distance_feature_to_feature(
+    min_f1point, min_f2point, min_d = self._feature_to_feature(
         feature_list[0], feature_list[1])
     total = min_d
     connectors = [(min_f1point, min_f2point)]
     at = min_f2point
     if len(feature_list) > 2:
       for feature_n in feature_list[2:]:
-        f_n_min_point, next_min_d = self._laser_distance_point_to_feature(
+        f_n_min_point, next_min_d = self._point_to_feature(
             at, feature_n)
         total += next_min_d
         connectors.append((at, f_n_min_point))
         at = f_n_min_point
-    total += self._point_distance(at, min_f1point)
+    total += self._point_to_point(at, min_f1point)
     connectors.append((at, min_f1point))
     return total, connectors
 
-  def _laser_distance_feature_to_feature(self, feature1, feature2):
+  def _feature_to_feature(self, feature1, feature2):
     min_d = sys.maxint
     for f1point in feature1.points:
-      f2point, next_min_d = self._laser_distance_point_to_feature(
+      f2point, next_min_d = self._point_to_feature(
           f1point, feature2)
       if next_min_d < min_d:
         min_f1point, min_f2point = f1point, f2point
         min_d = next_min_d
     return min_f1point, min_f2point, min_d
 
-  def _laser_distance_point_to_feature(self, point, feature):
+  def _point_to_feature(self, point, feature):
     if len(feature.points) == 0:
       raise Exception("This feature doesn't have any points.")
     min_fpoint = None
     min_d = sys.maxint
     for fpoint in feature.points:
-      next_d = self._point_distance(point, fpoint)
+      next_d = self._point_to_point(point, fpoint)
       if next_d < min_d:
         min_fpoint = fpoint
         min_d = next_d
@@ -371,7 +382,7 @@ class CTNFrame:
     return seen_pixels, self._spread_out_draw_coords(draw_coords)
 
   def _spread_out_draw_coords(self, draw_coords):
-    self.max_step_size
+    MAX_STEP_SIZE
     i = 0
     return_draw_coords = []
     while i < len(draw_coords):
@@ -379,27 +390,27 @@ class CTNFrame:
       frm = draw_coords[i]
       to_offset = 1
       to = draw_coords[(i + to_offset) % len(draw_coords)]
-      d = self._point_distance(frm, to)
-      if d >= self.max_step_size:
-        if d > self.max_step_size:
+      d = self._point_to_point(frm, to)
+      if d >= MAX_STEP_SIZE:
+        if d > MAX_STEP_SIZE:
           return_draw_coords.extend(self._points_from_to(frm, to))
         i += 1
       else:
-        while d < self.max_step_size:
+        while d < MAX_STEP_SIZE:
           to_offset += 1
           new_to = i + to_offset
           if new_to >= len(draw_coords):
             return return_draw_coords
           to = draw_coords[new_to]
-          d = self._point_distance(frm, to)
+          d = self._point_to_point(frm, to)
         i = i + to_offset - 1 # Went too far, so back up 1.
     return return_draw_coords
 
   def _points_from_to(self, frm, to):
-    d = self._point_distance(frm, to)
-    if d <= self.max_step_size:
+    d = self._point_to_point(frm, to)
+    if d <= MAX_STEP_SIZE:
       return [frm, to]
-    step_count = d / self.max_step_size
+    step_count = d / MAX_STEP_SIZE
     to_return = []
     for step_i in range(self._to_int(step_count)):
       to_return.append(Coord(
@@ -411,7 +422,7 @@ class CTNFrame:
     # Hacky. Whatever.
     return int(flt + 1e-3)
 
-  def _point_distance(self, frm, to):
+  def _point_to_point(self, frm, to):
     # See? Basic high school math is important!
     return ((to.x - frm.x) ** 2 + (to.y - frm.y) ** 2) ** .5
 
@@ -460,6 +471,9 @@ def main():
       raise Exception("This script only accepts .png files as input.")
     ctn_frame = CTNFrame()
     ctn_frame.load_from_png(input_file)
+    got_max = ctn_frame.max_point_to_point()
+    if got_max > MAX_STEP_SIZE:
+      raise Exception("The maximum step size is %s but we got a maximum step of %s." % (MAX_STEP_SIZE, got_max))
     ctn.add_frame(ctn_frame)
     if options.debug:
       ctn_frame.write_debug(input_file[:-4] + "_debug.png")
