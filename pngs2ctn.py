@@ -11,21 +11,28 @@ example the point (-32768, -32768) is in the lower left corner.
 python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
 from collections import namedtuple
+from itertools import izip, chain
 from optparse import OptionParser
+from PIL import Image, ImageDraw
+import random
 from sets import Set
-from PIL import Image
+import sys
+
+
+random.seed("There's no love like your love.")
+
 
 class CTN:
   def __init__(self):
     self.frames = []
 
   def add_frame(self, ctn_frame):
-    frames.append(ctn_frame)
+    self.frames.append(ctn_frame)
 
   def write(self, output_file):
     out = open(output_file, "w")
     out.write(self.header_boilerplate())
-    for frame in self.frames()
+    for frame in self.frames():
       out.write(frame.get_bytes())
     out.write(self.footer_boilerplate())
 
@@ -42,32 +49,35 @@ class CTN:
 
 Point = namedtuple('Point', ['x', 'y', 'color'])
 
-Coordinate = namedtuple('Coordinate', ['x', 'y'])
+
+Coord = namedtuple('Coord', ['x', 'y'])
+
 
 directions = range(8)
 
-Class Go:
+
+class Go:
   UP, UP_RIGHT, RIGHT, DOWN_RIGHT, DOWN, DOWN_LEFT, LEFT, UP_LEFT = directions
 
   @classmethod
   def next(cls, at, direction):
     if direction == cls.UP:
-      return Coordinate(at.x, at.y - 1)
+      return Coord(at.x, at.y - 1)
     if direction == cls.RIGHT:
-      return Coordinate(at.x + 1, at.y)
+      return Coord(at.x + 1, at.y)
     if direction == cls.DOWN:
-      return Coordinate(at.x, at.y + 1)
+      return Coord(at.x, at.y + 1)
     if direction == cls.LEFT:
-      return Coordinate(at.x - 1, at.y)
+      return Coord(at.x - 1, at.y)
 
     if direction == cls.UP_RIGHT:
-      return Coordinate(at.x + 1, at.y - 1)
+      return Coord(at.x + 1, at.y - 1)
     if direction == cls.DOWN_RIGHT:
-      return Coordinate(at.x + 1, at.y + 1)
+      return Coord(at.x + 1, at.y + 1)
     if direction == cls.DOWN_LEFT:
-      return Coordinate(at.x - 1, at.y + 1)
+      return Coord(at.x - 1, at.y + 1)
     if direction == cls.UP_LEFT:
-      return Coordiante(at.x - 1, at.y - 1)
+      return Coord(at.x - 1, at.y - 1)
 
   @classmethod
   def direction_from_to(cls, frm, to):
@@ -93,90 +103,303 @@ Class Go:
 
   @classmethod
   def adjacent_4(cls, at):
-    return [cls.next(at, cls.UP), cls.next(at, cls.RIGHT), cls.next(at, cls.DOWN), cls.next(at, cls.LEFT)]
-
-  @classmethod
-  def adjacent_8(cls, at):
     return [
-        cls.next(at, cls.UP), cls.next(at, cls.UP_RIGHT),
-        cls.next(at, cls.RIGHT), cls.next(at, cls.DOWN_RIGHT),
-        cls.next(at, cls.DOWN), cls.next(at, cls.DOWN_LEFT),
-        cls.next(at, cls.LEFT), cls.next(at, cls.UP_LEFT)]
+        cls.next(at, cls.UP), cls.next(at, cls.RIGHT),
+        cls.next(at, cls.DOWN), cls.next(at, cls.LEFT)]
 
 
-Feature = namedtuple('Feature', ['pixels', 'draw_points'])
+Feature = namedtuple('Feature', ['color', 'points'])
 
 
 class CTNFrame:
-  def __init__(self, override_color=None):
-    self.points = ()
-    self.override_color = override_color
-    self.features = set()
+  def __init__(self):
+    self.features = []
+    # TODO: Test to find out what this actualy is.
+    self.max_step_size = 5.0 / 500.0
 
   def write_debug(self, file_name):
-    debug = Image.new("w", (500, 500))
+    debug_size = 500
+    debug = Image.new("1", (debug_size, debug_size))
+    draw = ImageDraw.Draw(debug)
     for feature in self.features:
-      for (index, point) in enumerate(feature.draw_points):
-        to_point = feature.draw_points[(index + 1)]
+      points = [self._draw_2_debug(c, debug_size) for c in feature.points]
+      for index, from_point in enumerate(points):
+        to_point = points[(index + 1) % len(points)]
+        if feature.color > 0:
+          draw.line((from_point.x, from_point.y, to_point.x, to_point.y), fill=1)
+        draw.line(self._valid_line(from_point.x - 1, from_point.y, from_point.x + 1, from_point.y, debug_size), fill=1)
+        draw.line(self._valid_line(from_point.x, from_point.y - 1, from_point.x, from_point.y + 1, debug_size), fill=1)
+    debug.save(open(file_name, "w"), "PNG")
+
+  def _valid_line(self, x1, y1, x2, y2, maximum_exclusive):
+    return self._closest_valid(x1, y1, maximum_exclusive) + self._closest_valid(x2, y2, maximum_exclusive)
+
+  def _closest_valid(self, x, y, maximum_exclusive):
+    # Turns -1 into 0 and 500 into 499, but leaves 10 as 10.
+    maximum = maximum_exclusive - 1
+    return (min(maximum, max(0, x)), min(maximum, max(0, y)))
+
+  def _draw_2_debug(self, coord, dimension):
+    return Coord(int(coord.x * dimension), int(coord.y * dimension))
 
   def load_from_png(self, input_file):
-    image = Image(input_file)
-    self.image_width, self.image_height = im.size
+    self._load_png(input_file)
     self.find_features()
+    self.sort_and_connect_features()
+
+  def _load_png(self, input_file):
+    self.image = Image.open(input_file)
+    self.image_width, self.image_height = self.image.size
+    self.max_image_dimention = max(self.image.size)
 
   def find_features(self):
     seen_border = Set()
+    last_position = None
     for y in range(self.image_height):
       for x in range(self.image_width):
-        at = Coordinate(x, y)
+        at = Coord(x, y)
         if not at in seen_border and self.is_border(at):
-          feature = self.compute_feature(at)
-          for pixel : feature.pixels:
+          seen_pixels, draw_coords = self.compute_feature(at)
+          for pixel in seen_pixels:
             seen_border.add(pixel)
-          self.features.add(feature)
+          self.features.append(Feature(255, draw_coords))
+
+  def _sane_feature_shuffle(self, feature_copy):
+    feature_copy = list(feature_copy)
+    on = feature_copy[random.randint(0, len(feature_copy) - 1)]
+    shuffled = []
+    last_point = None
+
+    shuffled.append(on)
+    feature_copy.remove(on)
+
+    while len(feature_copy) > 0:
+      min_next_feature = None
+      min_next_d = sys.maxint
+      min_next_feature_point = None
+      for feature2 in feature_copy:
+        if last_point:
+          next_feature_point, next_d = self._laser_distance_point_to_feature(
+              last_point, feature2)
+        else:
+          throw_away, next_feature_point, next_d = self._laser_distance_feature_to_feature(
+              on, feature2)
+        if next_d < min_next_d:
+          min_next_feature = feature2
+          min_next_d = next_d
+          min_next_feature_point = next_feature_point
+      on = min_next_feature
+      shuffled.append(on)
+      feature_copy.remove(on)
+    return shuffled
+
+  def sort_and_connect_features(self):
+    """ You want to minimized the time moving the laser between features.
+    This is basically traveling salesman, so just poke around for a while
+    and take the best path we can find. Start with a sane feature ordering
+    where you pick one at random, and greedily add the closest feature one at
+    a time. Then do a few halfassed bubble sort moves. Repeat all that a few
+    times and keep the best one. I arrived at this algorithm by dicking around
+    on one fairly complicated design. Good enough for art! There's room for
+    improvement though. Going from features A -> B -> C means going from points
+    a1 -> b1 -> c1. Right now b1 is greedily optimized based solely on the
+    shortest pair of points between A and B, so b1 doesn't take feature C into
+    account at all. """
+    best_d = sys.maxint
+    best_connectors = None
+    best_features = self.features
+    feature_count = len(self.features)
+    for start_fresh in range(5):
+      feature_copy = self._sane_feature_shuffle(self.features)
+      current_d, current_connectors = self.laser_gap_distance(feature_copy)
+      for delta in range(1, 5):
+        for i in range(feature_count - delta):
+          self._swap_features(feature_copy, i, i + delta)
+          new_d, new_connectors = self.laser_gap_distance(feature_copy)
+          if new_d < current_d:
+            making_progress = True
+            current_d = new_d
+            current_connectors = new_connectors
+          else:
+            self._swap_features(feature_copy, i, i + delta)
+      if current_d < best_d:
+        best_d = current_d
+        best_connectors = current_connectors
+        best_features = list(feature_copy)
+    self.features = best_features
+    self.features = self._features_with_connectors(best_connectors)
+
+  def _swap_features(self, features, frm, to):
+    t = features[frm]
+    features[frm] = features[to]
+    features[to] = t
+
+  def _features_with_connectors(self, connectors):
+    features_with_connectors = []
+    for i, feature in enumerate(self.features):
+      connector = connectors[i]
+      i_offset = feature.points.index(connector[0])
+      new_feature_points = feature.points[i_offset:] + feature.points[:i_offset]
+      connector_points = self._points_from_to(connector[0], connector[1])
+      features_with_connectors += [Feature(feature.color, new_feature_points), Feature(0, connector_points)]
+    return features_with_connectors
+
+  def laser_gap_distance(self, feature_list):
+    """ Use this to help us sort the features so the laser has to travel a
+    reasonably not-stupid distance. """
+    if len(feature_list) == 0:
+      raise Exception("Extected a non-zero feature list")
+    if len(feature_list) == 1:
+      return 0.0, []
+    min_f1point, min_f2point, min_d = self._laser_distance_feature_to_feature(
+        feature_list[0], feature_list[1])
+    total = min_d
+    connectors = [(min_f1point, min_f2point)]
+    at = min_f2point
+    if len(feature_list) > 2:
+      for feature_n in feature_list[2:]:
+        f_n_min_point, next_min_d = self._laser_distance_point_to_feature(
+            at, feature_n)
+        total += next_min_d
+        connectors.append((at, f_n_min_point))
+        at = f_n_min_point
+    total += self._point_distance(at, min_f1point)
+    connectors.append((at, min_f1point))
+    return total, connectors
+
+  def _laser_distance_feature_to_feature(self, feature1, feature2):
+    min_d = sys.maxint
+    for f1point in feature1.points:
+      f2point, next_min_d = self._laser_distance_point_to_feature(
+          f1point, feature2)
+      if next_min_d < min_d:
+        min_f1point, min_f2point = f1point, f2point
+        min_d = next_min_d
+    return min_f1point, min_f2point, min_d
+
+  def _laser_distance_point_to_feature(self, point, feature):
+    if len(feature.points) == 0:
+      raise Exception("This feature doesn't have any points.")
+    min_fpoint = None
+    min_d = sys.maxint
+    for fpoint in feature.points:
+      next_d = self._point_distance(point, fpoint)
+      if next_d < min_d:
+        min_fpoint = fpoint
+        min_d = next_d
+    return min_fpoint, min_d
 
   def is_border(self, at):
     if self.is_white(at):
       return False
-    for check in Go.adjacent_4(at)
-      if not self.is_valid_coord(check) or self.is_white(check):
+    for check in Go.adjacent_4(at):
+      if not self.is_valid(check) or self.is_white(check):
         return True
     return False
 
-  def is_valid_coord(self, at):
-    return at.x >= 0 and at.x < self.image_width and at.y >= 0 and at.y < self.image_height
+  def is_white(self, at):
+    # A pixel can have 3 or 4 values depending on whether there's an alpha
+    # chanel.
+    return all([chanel == 255 for chanel in self.image.getpixel(at)])
+
+  def is_valid(self, at):
+    return at.x >= 0 and at.x < self.image_width and at.y >= 0 \
+           and at.y < self.image_height
+
+  def pixel_to_draw(self, at):
+    return Coord(
+        at.x * 1.0 / self.max_image_dimention,
+        at.y * 1.0 / self.max_image_dimention)
 
   def compute_feature(self, at):
-    """ Walk around the outside of a non-white blob. Keep adding points until
-    we hit a spot we added already. """
-    for index, go in directions:
+    """ Walk around the outside of a non-white blob. Pretend you have your back
+    to the feature, and outward keeps track of which direction your face is
+    pointed. Keep moving to your right, adding points until you go all the way
+    around to where you're about to draw the same point again. """
+    for go in directions:
       looking_at = Go.next(at, go)
       if not self.is_valid(looking_at) or self.is_white(looking_at):
-        outward = index
+        outward = go
         break
-    draw_coords = []
-    seen_pixels = set()
-    while not at in seen_pixels:
+    draw_coords = [] # The coords the laser projector should draw.
+    seen_pixels = set() # The actual pixels on the outside of this feature.
+    while True:
       seen_pixels.add(at)
 
+      # If we're on the bottom of a feature, you don't want to draw a point at
+      # the top of the pixel.
       draw_x, draw_y = at.x, at.y
       if outward in (Go.DOWN_RIGHT, Go.DOWN, Go.DOWN_LEFT):
         draw_y += 1
       if outward in (Go.UP_RIGHT, Go.RIGHT, Go.DOWN_RIGHT):
         draw_x += 1
-      draw_coords.append(Coordinate(draw_x, draw_y))
+      next_draw_coord = self.pixel_to_draw(Coord(draw_x, draw_y))
+      # If we started on a pointy bit, when we come back around to the very
+      # first pixel it'll get a second draw_coord. Hence, we often will not
+      # notice we're repeating unless we also pay attention to the second
+      # pixel. Hence, this 2 here.
+      if next_draw_coord in draw_coords[:2]:
+        break
+      draw_coords.append(next_draw_coord)
 
+      # We're looking outward. Rotate to the right until we see the next
+      # non-white pixel. That will be the next one to our right.
       for go_offset in range(len(directions)):
         looking_around = (outward + go_offset) % len(directions)
         looking_at = Go.next(at, looking_around)
-        if self.is_valid(looking_at) and not self.is_border(looking_at):
-          outward = (Go.direction_from_to(looking_at, at) + 1) % len(directions)
+        if self.is_valid(looking_at) and not self.is_white(looking_at):
+          # To compute the new outward, look back where we came from, and
+          # rotate once to the right.
+          looking_back = Go.direction_from_to(looking_at, at)
+          outward = (looking_back + 1) % len(directions)
           at = looking_at
           break
-    return Feature(seen_pixels, draw_coords)
+    return seen_pixels, self.spread_out_draw_coords(draw_coords)
 
-  def add_point(self, image, at):
-    self.points.append(Point(at.x, at.y, self.override_color or image.get((x, y))))
+  def spread_out_draw_coords(self, draw_coords):
+    self.max_step_size
+    i = 0
+    return_draw_coords = []
+    while i < len(draw_coords):
+      return_draw_coords.append(draw_coords[i])
+      frm = draw_coords[i]
+      to_offset = 1
+      to = draw_coords[(i + to_offset) % len(draw_coords)]
+      d = self._point_distance(frm, to)
+      if d >= self.max_step_size:
+        if d > self.max_step_size:
+          return_draw_coords.extend(self._points_from_to(frm, to))
+        i += 1
+      else:
+        while d < self.max_step_size:
+          to_offset += 1
+          new_to = i + to_offset
+          if new_to >= len(draw_coords):
+            return return_draw_coords
+          to = draw_coords[new_to]
+          d = self._point_distance(frm, to)
+        i = i + to_offset - 1 # Went too far, so back up 1.
+    return return_draw_coords
+
+  def _points_from_to(self, frm, to):
+    d = self._point_distance(frm, to)
+    if d <= self.max_step_size:
+      return [frm, to]
+    step_count = d / self.max_step_size
+    to_return = []
+    for step_i in range(self._to_int(step_count)):
+      to_return.append(Coord(
+          frm.x + 1.0 * step_i * (to.x - frm.x) / step_count,
+          frm.y + 1.0 * step_i * (to.y - frm.y) / step_count))
+    return to_return
+
+  def _to_int(self, flt):
+    # Hacky. Whatever.
+    return int(flt + 1e-5)
+
+  def _point_distance(self, frm, to):
+    # See? Basic high school math is important!
+    return ((to.x - frm.x) ** 2 + (to.y - frm.y) ** 2) ** .5
 
   def get_bytes(self):
     bytes = bytearray()
@@ -199,11 +422,18 @@ class CTNFrame:
     bytes.append(my_int % 256)
 
 
-if __name__ == "__main__":
+def main():
   parser = OptionParser()
-  parser.add_option("-i", "--input", dest="input_files", help="A comma delimited list of png files, each of which will become a single frame in the ctn")
-  parser.add_option("-o", "--output", dest="output_file", help="The output .CTN file.")
-  parser.add_option("-d", "--debug", action="store_true", dest="debug", default=False, help="Output a debug .png file for every input file.")
+  parser.add_option(
+      "-i", "--input", dest="input_files",
+      help=("A comma delimited list of png files, each of which will become a"
+            "single frame in the ctn"))
+  parser.add_option(
+      "-o", "--output", dest="output_file",
+      help="The output .CTN file.")
+  parser.add_option(
+      "-d", "--debug", action="store_true", dest="debug", default=False,
+      help="Output a debug .png file for every input file.")
   (options, args) = parser.parse_args()
   output = options.output_file
   if not output.lower().endswith(".ctn"):
@@ -220,5 +450,32 @@ if __name__ == "__main__":
     if options.debug:
       ctn_frame.write_debug(input_file[:-4] + "_debug.png")
 
-  ctn.write(output)
+  # ctn.write(output)
 
+
+def debug_sort_and_connect_features():
+  frame = CTNFrame()
+  def square_at(coord):
+    points = [
+        Coord(coord.x, coord.y), Coord(coord.x + .08, coord.y),
+        Coord(coord.x + .08, coord.y + .08), Coord(coord.x, coord.y + .08)]
+    return Feature(255, frame.spread_out_draw_coords(points))
+  frame.features = [
+      square_at(Coord(.1, .1)), square_at(Coord(.8, .2)),
+      square_at(Coord(.15, .3)), square_at(Coord(.85, .4))]
+  frame.sort_and_connect_features()
+  frame.write_debug("debug.png")
+
+
+def debug_find_features():
+  frame = CTNFrame()
+  frame._load_png("complex.png")
+  frame.find_features()
+
+  current_d, current_connectors = frame.laser_gap_distance(frame.features)
+
+  frame.write_debug("debug.png")
+
+
+if __name__ == "__main__":
+  main()
