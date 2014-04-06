@@ -6,7 +6,20 @@ Then it's a list of points. Each point is 2 bytes for x, 2 bytes for y,
 and 4 bytes for color. x and y are ints where (0, 0) is the center, not in a
 corner like you might expect. y increases as you move up and x increases as
 you move right. The minimum x or y is -32768 and the maximum is 32768. So for
-example the point (-32768, -32768) is in the lower left corner.
+example the point (-32768, -32768) is in the lower left corner in the CTN
+format..
+
+TODO: I'm calculating the distance between a and b as cartesian, a.k.a.
+((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** .5. But x and y are controlled with
+completely separate mirrors. So as far as the machine is concerned, distance
+is probably more like min([abs(a.x - b.x), abs(a.y - b.y)]). Run a script over
+the sample CTNs and see what the maximum x delta, y delta, and cartesian delta
+are.
+
+TODO: It looks like some of these don't connect all the way. Test that I'm
+getting distances like I expect.
+
+TODO: See if a too-large gap is what caused my squiggle to truncate.
 
 python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
@@ -118,7 +131,7 @@ class CTNFrame:
     self.max_step_size = 5.0 / 500.0
 
   def write_debug(self, file_name):
-    debug_size = 500
+    debug_size = 750
     debug = Image.new("1", (debug_size, debug_size))
     draw = ImageDraw.Draw(debug)
     for feature in self.features:
@@ -182,8 +195,8 @@ class CTNFrame:
           next_feature_point, next_d = self._laser_distance_point_to_feature(
               last_point, feature2)
         else:
-          throw_away, next_feature_point, next_d = self._laser_distance_feature_to_feature(
-              on, feature2)
+          throw_away, next_feature_point, next_d = \
+              self._laser_distance_feature_to_feature(on, feature2)
         if next_d < min_next_d:
           min_next_feature = feature2
           min_next_d = next_d
@@ -235,7 +248,14 @@ class CTNFrame:
     features[to] = t
 
   def _features_with_connectors(self, connectors):
+    """ TODO: It's stupid that connectors is passed while features is a
+    property. """
     features_with_connectors = []
+    if len(connectors) == 0:
+      if len(self.features) == 1:
+        return [self.features[0]]
+      else:
+        raise Exception("I got no connectors, but I have more than 1 feature.")
     for i, feature in enumerate(self.features):
       connector = connectors[i]
       i_offset = feature.points.index(connector[0])
@@ -246,7 +266,8 @@ class CTNFrame:
 
   def laser_gap_distance(self, feature_list):
     """ Use this to help us sort the features so the laser has to travel a
-    reasonably not-stupid distance. """
+    reasonably not-stupid distance.
+    TODO: A bunch of functions ought to be 'private'. """
     if len(feature_list) == 0:
       raise Exception("Extected a non-zero feature list")
     if len(feature_list) == 1:
@@ -395,7 +416,7 @@ class CTNFrame:
 
   def _to_int(self, flt):
     # Hacky. Whatever.
-    return int(flt + 1e-5)
+    return int(flt + 1e-3)
 
   def _point_distance(self, frm, to):
     # See? Basic high school math is important!
