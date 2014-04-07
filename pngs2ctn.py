@@ -18,6 +18,7 @@ TODO: See if a too-large gap is what caused my squiggle to truncate.
 python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
 from collections import namedtuple
+from math import ceil
 from optparse import OptionParser
 from PIL import Image, ImageDraw
 import random
@@ -35,6 +36,10 @@ is probably more like min([abs(a.x - b.x), abs(a.y - b.y)]). Run a script over
 the sample CTNs and see what the maximum x delta, y delta, and cartesian delta
 are. """
 MAX_STEP_SIZE = 5.0 / 500.0
+
+
+# Hacky. Whatever.
+FUDGE_FACTOR = 1e-5
 
 
 class CTN:
@@ -135,10 +140,12 @@ class CTNFrame:
       points = [self._draw_2_debug(c, debug_size) for c in feature.points]
       for index, from_point in enumerate(points):
         to_point = points[(index + 1) % len(points)]
+        fx = from_point.x
+        fy = from_point.y
         if feature.color > 0:
-          draw.line((from_point.x, from_point.y, to_point.x, to_point.y), fill=1)
-        draw.line(self._valid_line(from_point.x - 1, from_point.y, from_point.x + 1, from_point.y, debug_size), fill=1)
-        draw.line(self._valid_line(from_point.x, from_point.y - 1, from_point.x, from_point.y + 1, debug_size), fill=1)
+          draw.line((fx, fy, to_point.x, to_point.y), fill=1)
+        draw.line(self._valid_line(fx - 1, fy, fx + 1, fy, debug_size), fill=1)
+        draw.line(self._valid_line(fx, fy - 1, fx, fy + 1, debug_size), fill=1)
     debug.save(open(file_name, "w"), "PNG")
 
   def _valid_line(self, x1, y1, x2, y2, maximum_exclusive):
@@ -157,13 +164,24 @@ class CTNFrame:
     self._find_features()
     self._sort_and_connect_features()
 
-  def max_point_to_point(self):
+  def _max_point_to_point(self):
     last_point = None
     max_d = 0.0
-    for feature in self.features:
-      for point in feature.points:
+    for feature_index, feature in enumerate(self.features):
+      for point_index, point in enumerate(feature.points):
         if last_point:
-          max_d = max(max_d, self._point_to_point(last_point, point))
+          next_d = self._point_to_point(last_point, point)
+          if next_d > MAX_STEP_SIZE:
+            this_color = self.features[feature_index].color
+            if point_index == 0:
+              print "The problem is going from a feature with color %s to one with color %s" % (
+                  self.features[feature_index - 1].color, this_color)
+            else:
+              print "The problem is from %s to %s in a feature with color %s and length %s" % (
+                  point_index - 1, point_index, this_color, len(self.features[feature_index].points))
+          elif next_d <= FUDGE_FACTOR:
+            print "we've got 2 points too close together. %s" % next_d
+          max_d = max(max_d, next_d)
         last_point = point
     return max_d
 
@@ -203,7 +221,7 @@ class CTNFrame:
               last_point, feature2)
         else:
           throw_away, next_feature_point, next_d = \
-              self._feature_to_feature(on, feature2)
+              self._feature_to_feature_dist(on, feature2)
         if next_d < min_next_d:
           min_next_feature = feature2
           min_next_d = next_d
@@ -231,11 +249,11 @@ class CTNFrame:
     feature_count = len(self.features)
     for start_fresh in range(5):
       feature_copy = self._sane_feature_shuffle(self.features)
-      current_d, current_connectors = self._laser_gap_distance(feature_copy)
+      current_d, current_connectors = self._total_laser_gap_dist(feature_copy)
       for delta in range(1, 5):
         for i in range(feature_count - delta):
           self._swap_features(feature_copy, i, i + delta)
-          new_d, new_connectors = self._laser_gap_distance(feature_copy)
+          new_d, new_connectors = self._total_laser_gap_dist(feature_copy)
           if new_d < current_d:
             making_progress = True
             current_d = new_d
@@ -269,14 +287,14 @@ class CTNFrame:
       features_with_connectors += [Feature(feature.color, new_feature_points), Feature(0, connector_points)]
     return features_with_connectors
 
-  def _laser_gap_distance(self, feature_list):
+  def _total_laser_gap_dist(self, feature_list):
     """ Use this to help us sort the features so the laser has to travel a
     reasonably not-stupid distance. """
     if len(feature_list) == 0:
       raise Exception("Extected a non-zero feature list")
     if len(feature_list) == 1:
       return 0.0, []
-    min_f1point, min_f2point, min_d = self._feature_to_feature(
+    min_f1point, min_f2point, min_d = self._feature_to_feature_dist(
         feature_list[0], feature_list[1])
     total = min_d
     connectors = [(min_f1point, min_f2point)]
@@ -292,7 +310,7 @@ class CTNFrame:
     connectors.append((at, min_f1point))
     return total, connectors
 
-  def _feature_to_feature(self, feature1, feature2):
+  def _feature_to_feature_dist(self, feature1, feature2):
     min_d = sys.maxint
     for f1point in feature1.points:
       f2point, next_min_d = self._point_to_feature(
@@ -382,12 +400,11 @@ class CTNFrame:
     return seen_pixels, self._spread_out_draw_coords(draw_coords)
 
   def _spread_out_draw_coords(self, draw_coords):
-    MAX_STEP_SIZE
     i = 0
     return_draw_coords = []
     while i < len(draw_coords):
-      return_draw_coords.append(draw_coords[i])
       frm = draw_coords[i]
+      return_draw_coords.append(frm)
       to_offset = 1
       to = draw_coords[(i + to_offset) % len(draw_coords)]
       d = self._point_to_point(frm, to)
@@ -397,12 +414,17 @@ class CTNFrame:
         i += 1
       else:
         while d < MAX_STEP_SIZE:
-          to_offset += 1
-          new_to = i + to_offset
-          if new_to >= len(draw_coords):
+          if i + to_offset == len(draw_coords):
+            # We need to connect the circle, so to speak. The laser has to be
+            # able to trace all the way around this feature because we may
+            # choose to start drawing this feature anywhere in the middle.
+            if self._point_to_point(frm, draw_coords[0]) > MAX_STEP_SIZE:
+              # a.k.a. i + to_offset - 1, a.k.a. len(draw_coords) - 1
+              return_draw_coords.append(draw_coords[-1])
             return return_draw_coords
-          to = draw_coords[new_to]
-          d = self._point_to_point(frm, to)
+          to_offset += 1
+          if i + to_offset < len(draw_coords):
+            d = self._point_to_point(frm, draw_coords[i + to_offset])
         i = i + to_offset - 1 # Went too far, so back up 1.
     return return_draw_coords
 
@@ -410,17 +432,17 @@ class CTNFrame:
     d = self._point_to_point(frm, to)
     if d <= MAX_STEP_SIZE:
       return [frm, to]
-    step_count = d / MAX_STEP_SIZE
+    step_count = int(ceil(d / MAX_STEP_SIZE))
     to_return = []
     for step_i in range(self._to_int(step_count)):
       to_return.append(Coord(
           frm.x + 1.0 * step_i * (to.x - frm.x) / step_count,
           frm.y + 1.0 * step_i * (to.y - frm.y) / step_count))
+    last_d = self._point_to_point(to, to_return[-1])
     return to_return
 
   def _to_int(self, flt):
-    # Hacky. Whatever.
-    return int(flt + 1e-3)
+    return int(flt + FUDGE_FACTOR)
 
   def _point_to_point(self, frm, to):
     # See? Basic high school math is important!
@@ -471,7 +493,7 @@ def main():
       raise Exception("This script only accepts .png files as input.")
     ctn_frame = CTNFrame()
     ctn_frame.load_from_png(input_file)
-    got_max = ctn_frame.max_point_to_point()
+    got_max = ctn_frame._max_point_to_point()
     if got_max > MAX_STEP_SIZE:
       raise Exception("The maximum step size is %s but we got a maximum step of %s." % (MAX_STEP_SIZE, got_max))
     ctn.add_frame(ctn_frame)
@@ -500,7 +522,7 @@ def debug_find_features():
   frame._load_png("complex.png")
   frame._find_features()
 
-  current_d, current_connectors = frame._laser_gap_distance(frame.features)
+  current_d, current_connectors = frame._total_laser_gap_dist(frame.features)
 
   frame.write_debug("debug.png")
 
