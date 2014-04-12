@@ -1,19 +1,26 @@
 """
-The CTN file format is really pretty simple. It starts with 16 bytes of
-boilerplate. Then you've got an array of frames. Each frame has a 16
-byte header which includes info on how many points are in the frame.
-Then it's a list of points. Each point is 2 bytes for x, 2 bytes for y,
-and 4 bytes for color. x and y are ints where (0, 0) is the center, not in a
-corner like you might expect. y increases as you move up and x increases as
-you move right. The minimum x or y is -32768 and the maximum is 32768. So for
-example the point (-32768, -32768) is in the lower left corner in the CTN
-format..
+The CTN file format is really pretty simple. It's an array of frames. Each
+frame has some boilerplate, then a few values describing how many points there
+are and which frame this is and out of how many. Then it lists all the points.
+Each point is 2 bytes for x, 2 bytes for y, and 4 bytes for color. x goes up
+from left to right starting with 0x8000. In other words, 1000000000000000 is on
+the far left, 0000000000000000 is halfway, and 0111111111111111 is on the far
+right. y goes up from bottom to top starting with 0x8000. Each point must be
+at least MAX_STEP_SIZE close to each other, otherwise the laser projector will
+truncate your design as soon as it hits a gap that's too big.
 
+Finally there's a little boilerplate at the bottom.
 
-TODO: It looks like some of these connectors aren't connecting all the way.
-Test that I'm getting distances like I expect.
+This script takes a list of png file names and turns those into the frames of
+a single .CTN file. Any edge between white and non-white in the .png will
+become a green laser line. This is perfect for paint-by-laser, and not very
+helpful at all for creating laser animations.
 
-TODO: See if a too-large gap is what caused my squiggle to truncate.
+Therefore, TODO: Add a laser animation mode which interprets .pngs differently.
+I'm thinking this mode interprets black as the background, and any border
+between black and non-black becomes the non-black color.
+
+Also, TODO: Figure out how color works, exactly.
 
 python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
@@ -38,42 +45,69 @@ are. """
 MAX_STEP_SIZE = 5.0 / 500.0
 
 
-# Hacky. Whatever.
-FUDGE_FACTOR = 1e-5
+Coord = namedtuple('Coord', ['x', 'y'])
 
 
 class CTN:
+  BOILER_PLATE = 'CRTN' + '\x00' * 20
+
   def __init__(self):
     self.frames = []
 
   def add_frame(self, ctn_frame):
     self.frames.append(ctn_frame)
 
-  def write(self, output_file):
-    out = open(output_file, "w")
-    out.write(self._header_boilerplate())
-    for frame in self.frames():
-      out.write(frame.get_bytes())
-    out.write(self._footer_boilerplate())
+  def write(self, output_file_path):
+    out = open(output_file_path, "w")
+    frame_count = self._2B_int(len(self.frames))
+    for frame_index, frame in enumerate(self.frames):
+      point_array = bytearray()
+      point_count = 0
+      for feature in frame.features:
+        for point in feature.points:
+          point_count += 1
+          point_array.extend(self._2B_position(point.x))
+          # I'm used to y = 0 meaning the top so that's how I programmed it,
+          # but .CTNs put y = 0 at the bottom.
+          point_array.extend(self._2B_position(1.0 - point.y))
+          if feature.color > 0:
+            point_array.extend('\x00\x00\x00\x08')
+          else:
+            point_array.extend('\x00\x00\x40\x00')
+      self._write_frame_header(out, point_count, frame_index, frame_count)
+      out.write(point_array)
+    self._write_footer(out, frame_count)
 
-  def _header_boilerplate(self):
-    header = bytearray()
-    header.extend((0,) * 8)
-    return header
+  def _2B_position(self, value):
+    """ value is in the range [0.0, 1.0]. The maximum unsigned int you can
+    express with 2 bytes is 0xFFFF. So self._2B_int(int(value * 0xFFFF)) is
+    what we'd return if 0x0 meant 0 in .CTN files. However, 0x8000 means 0. So
+    we add our result to 0x8000. """
+    return self._2B_int(0x8000 + int(value * 0xFFFF))
 
-  def _footer_boilerplate(self):
-    footer = bytearray()
-    footer.extend((0,) * 8)
-    return footer
+  def _2B_int(self, value):
+    """ struct.pack('>I', value)[-2:] works too but it's slightly slower and
+    less clear. """
+    return chr((value & 0x00FFFF) / 256) + chr(value % 256)
+
+  def _write_frame_header(self, out, point_count, frame_index, frame_count):
+    out.write(self.BOILER_PLATE)
+    out.write(self._2B_int(point_count))
+    out.write(self._2B_int(frame_index))
+    out.write(frame_count)
+    out.write('\x00' * 2)
+
+  def _write_footer(self, out, frame_count):
+    out.write(self.BOILER_PLATE)
+    out.write('\x00' * 4)
+    out.write(frame_count)
+    out.write('\x00' * 2)
 
 
-Coord = namedtuple('Coord', ['x', 'y'])
-
-
-directions = range(8)
 
 
 class Go:
+  directions = range(8)
   UP, UP_RIGHT, RIGHT, DOWN_RIGHT, DOWN, DOWN_LEFT, LEFT, UP_LEFT = directions
 
   @classmethod
@@ -163,27 +197,6 @@ class CTNFrame:
     self._load_png(input_file)
     self._find_features()
     self._sort_and_connect_features()
-
-  def _max_point_to_point(self):
-    last_point = None
-    max_d = 0.0
-    for feature_index, feature in enumerate(self.features):
-      for point_index, point in enumerate(feature.points):
-        if last_point:
-          next_d = self._point_to_point(last_point, point)
-          if next_d > MAX_STEP_SIZE:
-            this_color = self.features[feature_index].color
-            if point_index == 0:
-              print "The problem is going from a feature with color %s to one with color %s" % (
-                  self.features[feature_index - 1].color, this_color)
-            else:
-              print "The problem is from %s to %s in a feature with color %s and length %s" % (
-                  point_index - 1, point_index, this_color, len(self.features[feature_index].points))
-          elif next_d <= FUDGE_FACTOR:
-            print "we've got 2 points too close together. %s" % next_d
-          max_d = max(max_d, next_d)
-        last_point = point
-    return max_d
 
   def _load_png(self, input_file):
     self.image = Image.open(input_file)
@@ -359,7 +372,7 @@ class CTNFrame:
     to the feature, and outward keeps track of which direction your face is
     pointed. Keep moving to your right, adding points until you go all the way
     around to where you're about to draw the same point again. """
-    for go in directions:
+    for go in Go.directions:
       looking_at = Go.next(at, go)
       if not self._is_valid(looking_at) or self._is_white(looking_at):
         outward = go
@@ -387,14 +400,14 @@ class CTNFrame:
 
       # We're looking outward. Rotate to the right until we see the next
       # non-white pixel. That will be the next one to our right.
-      for go_offset in range(len(directions)):
-        looking_around = (outward + go_offset) % len(directions)
+      for go_offset in range(len(Go.directions)):
+        looking_around = (outward + go_offset) % len(Go.directions)
         looking_at = Go.next(at, looking_around)
         if self._is_valid(looking_at) and not self._is_white(looking_at):
           # To compute the new outward, look back where we came from, and
           # rotate once to the right.
           looking_back = Go.direction_from_to(looking_at, at)
-          outward = (looking_back + 1) % len(directions)
+          outward = (looking_back + 1) % len(Go.directions)
           at = looking_at
           break
     return seen_pixels, self._spread_out_draw_coords(draw_coords)
@@ -442,10 +455,11 @@ class CTNFrame:
     return to_return
 
   def _to_int(self, flt):
-    return int(flt + FUDGE_FACTOR)
+    # Hacky. Whatever.
+    return int(flt + 1e-5)
 
   def _point_to_point(self, frm, to):
-    # See? Basic high school math is important!
+    # See? Basic high school math. That shit is important!
     return ((to.x - frm.x) ** 2 + (to.y - frm.y) ** 2) ** .5
 
   def get_bytes(self):
@@ -493,38 +507,11 @@ def main():
       raise Exception("This script only accepts .png files as input.")
     ctn_frame = CTNFrame()
     ctn_frame.load_from_png(input_file)
-    got_max = ctn_frame._max_point_to_point()
-    if got_max > MAX_STEP_SIZE:
-      raise Exception("The maximum step size is %s but we got a maximum step of %s." % (MAX_STEP_SIZE, got_max))
     ctn.add_frame(ctn_frame)
     if options.debug:
       ctn_frame.write_debug(input_file[:-4] + "_debug.png")
 
-  # ctn.write(output)
-
-
-def debug_sort_and_connect_features():
-  frame = CTNFrame()
-  def square_at(coord):
-    points = [
-        Coord(coord.x, coord.y), Coord(coord.x + .08, coord.y),
-        Coord(coord.x + .08, coord.y + .08), Coord(coord.x, coord.y + .08)]
-    return Feature(255, frame._spread_out_draw_coords(points))
-  frame.features = [
-      square_at(Coord(.1, .1)), square_at(Coord(.8, .2)),
-      square_at(Coord(.15, .3)), square_at(Coord(.85, .4))]
-  frame._sort_and_connect_features()
-  frame.write_debug("debug.png")
-
-
-def debug_find_features():
-  frame = CTNFrame()
-  frame._load_png("complex.png")
-  frame._find_features()
-
-  current_d, current_connectors = frame._total_laser_gap_dist(frame.features)
-
-  frame.write_debug("debug.png")
+  ctn.write(output)
 
 
 if __name__ == "__main__":
