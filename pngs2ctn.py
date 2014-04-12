@@ -45,6 +45,11 @@ are. """
 MAX_STEP_SIZE = 5.0 / 500.0
 
 
+""" If an image comes in with a height or width greater than this in pixels,
+resize it before we process it. Close enough for rock and roll. """
+MAX_IMAGE_DIMENSION = 1000
+
+
 Coord = namedtuple('Coord', ['x', 'y'])
 
 
@@ -66,13 +71,15 @@ class CTN:
       point_count = 0
       for feature in frame.features:
         for point in feature.points:
-          for i in range(self.repeat_yourself):
+          yes_color = feature.color > 0
+          # No need to repeat for accuracy during the blank parts.
+          for i in range(self.repeat_yourself if yes_color else 1):
             point_count += 1
             point_array.extend(self._2B_position(point.x))
             # I'm used to y = 0 meaning the top so that's how I programmed it,
             # but .CTNs put y = 0 at the bottom.
             point_array.extend(self._2B_position(1.0 - point.y))
-            if feature.color > 0:
+            if yes_color:
               point_array.extend('\x00\x00\x00\x08')
             else:
               point_array.extend('\x00\x00\x40\x00')
@@ -201,6 +208,11 @@ class CTNFrame:
   def _load_png(self, input_file):
     self.image = Image.open(input_file)
     self.image_width, self.image_height = self.image.size
+    if self.image_width > MAX_IMAGE_DIMENSION or \
+       self.image_height > MAX_IMAGE_DIMENSION:
+      ratio = min([1.0 * MAX_IMAGE_DIMENSION / d for d in self.image.size])
+      self.image = self.image.resize((int(ratio * self.image_width), int(ratio * self.image_height)))
+      self.image_width, self.image_height = self.image.size
     self.max_image_dimention = max(self.image.size)
 
   def _find_features(self):
