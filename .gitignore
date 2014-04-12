@@ -4,6 +4,9 @@
 # Debugging pngs
 *debug.png
 
+# CTN files
+*.CTN
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -506,7 +506,7 @@ def main():
   if not output.lower().endswith(".ctn"):
     output += ".CTN"
 
-  ctn = CTN(repeat_yourself=repeat_yourself)
+  ctn = CTN(repeat_yourself=int(options.repeat_yourself))
 
   for input_file in options.input_files.split(","):
     if not input_file.lower().endswith(".png"):
