@@ -51,7 +51,8 @@ Coord = namedtuple('Coord', ['x', 'y'])
 class CTN:
   BOILER_PLATE = 'CRTN' + '\x00' * 20
 
-  def __init__(self):
+  def __init__(self, repeat_yourself=2):
+    self.repeat_yourself = repeat_yourself
     self.frames = []
 
   def add_frame(self, ctn_frame):
@@ -65,15 +66,16 @@ class CTN:
       point_count = 0
       for feature in frame.features:
         for point in feature.points:
-          point_count += 1
-          point_array.extend(self._2B_position(point.x))
-          # I'm used to y = 0 meaning the top so that's how I programmed it,
-          # but .CTNs put y = 0 at the bottom.
-          point_array.extend(self._2B_position(1.0 - point.y))
-          if feature.color > 0:
-            point_array.extend('\x00\x00\x00\x08')
-          else:
-            point_array.extend('\x00\x00\x40\x00')
+          for i in range(self.repeat_yourself):
+            point_count += 1
+            point_array.extend(self._2B_position(point.x))
+            # I'm used to y = 0 meaning the top so that's how I programmed it,
+            # but .CTNs put y = 0 at the bottom.
+            point_array.extend(self._2B_position(1.0 - point.y))
+            if feature.color > 0:
+              point_array.extend('\x00\x00\x00\x08')
+            else:
+              point_array.extend('\x00\x00\x40\x00')
       self._write_frame_header(out, point_count, frame_index, frame_count)
       out.write(point_array)
     self._write_footer(out, frame_count)
@@ -102,8 +104,6 @@ class CTN:
     out.write('\x00' * 4)
     out.write(frame_count)
     out.write('\x00' * 2)
-
-
 
 
 class Go:
@@ -255,7 +255,9 @@ class CTNFrame:
     improvement though. Going from features A -> B -> C means going from points
     a1 -> b1 -> c1. Right now b1 is greedily optimized based solely on the
     shortest pair of points between A and B, so b1 doesn't take feature C into
-    account at all. """
+    account at all.
+
+    This is where we spend most of our time. """
     best_d = sys.maxint
     best_connectors = None
     best_features = self.features
@@ -487,7 +489,7 @@ def main():
   parser = OptionParser()
   parser.add_option(
       "-i", "--input", dest="input_files",
-      help=("A comma delimited list of png files, each of which will become a"
+      help=("A comma delimited list of png files, each of which will become a "
             "single frame in the ctn"))
   parser.add_option(
       "-o", "--output", dest="output_file",
@@ -495,12 +497,16 @@ def main():
   parser.add_option(
       "-d", "--debug", action="store_true", dest="debug", default=False,
       help="Output a debug .png file for every input file.")
+  parser.add_option(
+      "-r", "--repeat_yourself", dest="repeat_yourself", default=2,
+      help=("How long should the laser linger at each point. Higher values "
+            "mean more accuracy but more flickering."))
   (options, args) = parser.parse_args()
   output = options.output_file
   if not output.lower().endswith(".ctn"):
     output += ".CTN"
 
-  ctn = CTN()
+  ctn = CTN(repeat_yourself=repeat_yourself)
 
   for input_file in options.input_files.split(","):
     if not input_file.lower().endswith(".png"):
