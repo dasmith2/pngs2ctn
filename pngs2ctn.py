@@ -339,15 +339,12 @@ class CTNCreator:
         big_ctns.append(self._ctn_from_features([feature]))
         features.remove(feature)
 
-    ctnCount = 1
-    ctns = self._get_CTN_helper(features, ctnCount)
-    while self._too_many_points(ctns):
-      ctnCount += 1
-      ctns = self._get_CTN_helper(features, ctnCount)
+    list_count = 1
+    feature_lists = self._greedy_feature_list_builder(features, list_count, max_points)
+    while not feature_lists:
+      list_count += 1
+      feature_lists = self._greedy_feature_list_builder(features, list_count, max_points)
     return big_ctns + ctns
-
-  def _too_many_points(self, ctns):
-    pass
 
   def _ctn_from_features(self, features):
     pass
