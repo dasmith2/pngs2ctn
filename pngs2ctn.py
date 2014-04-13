@@ -320,10 +320,10 @@ class DebugFrameDrawer:
     return (min(maximum, max(0, x)), min(maximum, max(0, y)))
 
 
-
 class CTNCreator:
   """ Here's where we take our beautiful abstract list of features and turn
   them into gritty CTN files that work OK in real life. """
+
 
   def get_CTNs(self, features, repeat_yourself, max_points):
     for index, feature in features:
@@ -346,9 +346,6 @@ class CTNCreator:
       ctns = self._get_CTN_helper(features, ctnCount)
     return big_ctns + ctns
 
-  def _get_CTN_helper(self, features, ctnCount):
-    pass
-
   def _too_many_points(self, ctns):
     pass
 
@@ -364,46 +361,74 @@ class CTNCreator:
 
   class _FeatureList:
     def __init__(self, first_feature):
-      self.features = []
-      self.point_count = 0
+      self.features = [first_feature]
+      self.point_count = len(feature.points)
       self.last_point = None
-      self.addFeature(first_feature)
+      # Are there ANY features left that won't put us over the limit?
+      self.some_left = True
 
-    def addFeature(self, feature):
+    def addFeature(self, connector, feature, feature_connection_point):
+      self.features.append(connector)
       self.features.append(feature)
-      self.point_count += len(feature.points)
+      self.point_count += len(connector.points) + len(feature.points)
+      self.last_point = feature_connection_point
 
-  def _greedy_feature_list_builder(self, features, list_count):
+  def _greedy_feature_list_builder(self, features, list_count, max_points):
     if len(features) <= list_count:
       return [[f] for f in features]
 
-    feature_copy = list(features)
+    features_copy = list(features)
     feature_lists = []
     list_of_counts = []
     for i in range(list_count):
-      random_feature = feature_copy[random.randint(0, len(feature_copy) - 1)]
-      feature_copy.remove(random_feature)
+      random_feature = random.choice(features_copy)
+      features_copy.remove(random_feature)
       list_of_feature_lists.append(self._FeatureList(random_feature))
 
-    while len(feature_copy) > 0:
-      # In terms of python code readability, list comprehensions are the worst
-      # thing that ever happened to me.
-      shortest = sorted([f.point_count, f for f in feature_lists])[0][1]
+    while len(features_copy) > 0:
+      feature_lists.sort(lambda x, y: x.point_count - y.point_count)
+      available = [f for f in feature_lists if f.some_left]
+      if not available:
+        return None
+      shortest = available[0]
+      min_next_feature = None
+      min_next_d = sys.maxint
+      min_next_connection_point
+      for feature2 in features_copy:
+        if shortest.last_point:
+          last_feature_point = shortest.last_point
+          next_feature_point, next_d = self._point_to_feature(
+              last_point, feature2)
+        else:
+          last_feature_point, next_feature_point, next_d = \
+              self._feature_to_feature_dist(on, feature2)
+        connector = self._points_from_to(last_feature_point, next_feature_point)
+        more_points = len(connector) + len(feature2.points)
+        if next_d < min_next_d and shortest.point_count + more_points <= max_points:
+          min_next_feature = feature2
+          min_next_d = next_d
+          min_next_connection_point = next_feature_point
+          min_connector = connector
+      if min_next_feature:
+        shortest.addFeature(min_connector, min_next_feature, min_next_connection_point)
+        feature_copy.remove(min_next_connection_point)
+      else:
+        shortest.some_left = False
 
   def _sane_feature_shuffle(self, features):
-    feature_copy = list(features)
-    on = feature_copy[random.randint(0, len(feature_copy) - 1)]
+    features_copy = list(features)
+    on = features_copy[random.randint(0, len(features_copy) - 1)]
     shuffled = []
     last_point = None
 
     shuffled.append(on)
-    feature_copy.remove(on)
+    features_copy.remove(on)
 
-    while len(feature_copy) > 0:
+    while len(features_copy) > 0:
       min_next_feature = None
       min_next_d = sys.maxint
-      min_next_feature_point = None
-      for feature2 in feature_copy:
+      min_next_connection_point = None
+      for feature2 in features_copy:
         if last_point:
           next_feature_point, next_d = self._point_to_feature(
               last_point, feature2)
@@ -413,7 +438,7 @@ class CTNCreator:
         if next_d < min_next_d:
           min_next_feature = feature2
           min_next_d = next_d
-          min_next_feature_point = next_feature_point
+          min_next_connection_point = next_feature_point
       on = min_next_feature
       shuffled.append(on)
       feature_copy.remove(on)
