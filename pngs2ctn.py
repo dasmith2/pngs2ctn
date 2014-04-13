@@ -1,27 +1,4 @@
 """
-<<<<<<< HEAD
-The CTN file format is really pretty simple. It's an array of frames. Each
-frame has some boilerplate, then a few values describing how many points there
-are and which frame this is and out of how many. Then it lists all the points.
-Each point is 2 bytes for x, 2 bytes for y, and 4 bytes for color. x goes up
-from left to right starting with 0x8000. In other words, 1000000000000000 is on
-the far left, 0000000000000000 is halfway, and 0111111111111111 is on the far
-right. y goes up from bottom to top starting with 0x8000. Each point must be
-at least MAX_STEP_SIZE close to each other, otherwise the laser projector will
-truncate your design as soon as it hits a gap that's too big.
-
-Finally there's a little boilerplate at the bottom.
-
-This script takes a list of png file names and turns those into the frames of
-a single .CTN file. Any edge between white and non-white in the .png will
-become a green laser line. This is perfect for paint-by-laser, and not very
-helpful at all for creating laser animations.
-
-Therefore, just in case anybody wants to make animations with this thing,
-TODO: Add a laser animation mode which interprets .pngs differently.
-I'm thinking this mode interprets black as the background, and any border
-between black and non-black becomes the non-black color.
-=======
 TODO: Get consistent about points vs coords.
 
 If you're here because you want to understand the CTN format for the blue
@@ -38,7 +15,6 @@ should take a list of input files, each of which will become a frame in a
 single output CTN file. It should interpret .pngs differently. I'm thinking
 this mode interprets black as the background, and any border between black and
 non-black becomes the non-black color.
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
 Also, TODO: Figure out how color works, exactly.
 
@@ -65,29 +41,9 @@ are. """
 MAX_STEP_SIZE = 5.0 / 500.0
 
 
-""" If an image comes in with a height or width greater than this in pixels,
-resize it before we process it. Close enough for rock and roll. """
-MAX_IMAGE_DIMENSION = 1000
-
-
 Coord = namedtuple('Coord', ['x', 'y'])
 
 
-<<<<<<< HEAD
-class CNTList:
-  """ A list of CTN files to support the max_points option. """
-  def __init__(self, max_points, input_file):
-    next_ctn_count = 1
-    last_points = sys.maxint
-    ctn_frame = CTNFrame()
-    ctn_frame.load_features(input_file)
-    while last_points > max_points:
-      frames = [CTNFrame() for i in range(next_ctn_count)]
-
-
-class CTN:
-  BOILER_PLATE = 'CRTN' + '\x00' * 20
-=======
 class CTNWriter:
   """ Here it is. You want to understand the CTN format? This is the class for
   you. The CTN file format is really pretty simple. It's an array of frames.
@@ -100,7 +56,6 @@ class CTNWriter:
   with 0x8000. Each point must be at least MAX_STEP_SIZE close to each other,
   otherwise the laser projector will truncate your design as soon as it hits a
   gap that's too big.
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
   Finally there's a little boilerplate at the bottom.
 
@@ -121,20 +76,6 @@ class CTNWriter:
       last_point = None
       for feature in frame.features:
         for point in feature.points:
-<<<<<<< HEAD
-          yes_color = feature.color > 0
-          # No need to repeat for accuracy during the blank parts.
-          for i in range(self.repeat_yourself if yes_color else 1):
-            point_count += 1
-            point_array.extend(self._2B_position(point.x))
-            # I'm used to y = 0 meaning the top so that's how I programmed it,
-            # but .CTNs put y = 0 at the bottom.
-            point_array.extend(self._2B_position(1.0 - point.y))
-            if yes_color:
-              point_array.extend('\x00\x00\x00\x08')
-            else:
-              point_array.extend('\x00\x00\x40\x00')
-=======
           # Reminder: a point is a namedtuple (x, y) where x and y are between
           # 0.0 and 1.0 inclusive.
           if point_to_point(last_point, point) > MAX_STEP_SIZE:
@@ -152,7 +93,6 @@ class CTNWriter:
             point_array.extend('\x00\x00\x00\x08')
           else:
             point_array.extend('\x00\x00\x40\x00')
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
       self._write_frame_header(out, point_count, frame_index, frame_count)
       out.write(point_array)
     self._write_footer(out, frame_count)
@@ -254,28 +194,13 @@ class PngFeatureFinder:
   def __init__(self, input_file):
     self.input_file = input_file
 
-<<<<<<< HEAD
-  def load_features(self, input_file):
-    self._load_png(input_file)
-    self._find_features()
-
-  def load_from_png(self, input_file):
-    self.load_features(input_file)
-    self._sort_and_connect_features()
-=======
   def get_features(self):
     self._load_png(input_file)
     return self._find_features()
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
   def _load_png(self):
     self.image = Image.open(self.input_file)
     self.image_width, self.image_height = self.image.size
-    if self.image_width > MAX_IMAGE_DIMENSION or \
-       self.image_height > MAX_IMAGE_DIMENSION:
-      ratio = min([1.0 * MAX_IMAGE_DIMENSION / d for d in self.image.size])
-      self.image = self.image.resize((int(ratio * self.image_width), int(ratio * self.image_height)))
-      self.image_width, self.image_height = self.image.size
     self.max_image_dimention = max(self.image.size)
 
   def _find_features(self):
@@ -400,11 +325,6 @@ class CTNCreator:
   """ Here's where we take our beautiful abstract list of features and turn
   them into gritty CTN files that work OK in real life. """
 
-<<<<<<< HEAD
-  def _sane_feature_shuffle(self, feature_list):
-    return self.shuffle_features_multiple_lists(
-        feature_list, ouput_list_count=1)[0]
-=======
   def get_CTNs(self, features, repeat_yourself, max_points):
     for index, feature in features:
       features[index] = self._spread_out_draw_coords(feature)
@@ -475,43 +395,31 @@ class CTNCreator:
     on = feature_copy[random.randint(0, len(feature_copy) - 1)]
     shuffled = []
     last_point = None
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
-  def shuffle_features_multiple_lists(self, feature_list, ouput_list_count):
-    feature_copy = list(feature_list)
-    shuffleds = [[] for i in range(ouput_list_count)]
-
-    for shuffled in shuffleds:
-      on = feature_copy[random.randint(0, len(feature_copy) - 1)]
-      shuffled.append(on)
-      feature_copy.remove(on)
-    last_points = [None for shuffled in shuffleds]
+    shuffled.append(on)
+    feature_copy.remove(on)
 
     while len(feature_copy) > 0:
-      # TODO: This is wrong. It should add a feature to whichever list has the
-      # least points, not whichever list has the least features.
-      for shuffled_index, shuffled in enumerate(shuffleds):
-        min_next_feature = None
-        min_next_d = sys.maxint
-        min_next_feature_point = None
-        for feature2 in feature_copy:
-          if last_points[shuffled_index]:
-            next_feature_point, next_d = self._point_to_feature(
-                last_points[shuffled_index], feature2)
-          else:
-            throw_away, next_feature_point, next_d = \
-                self._feature_to_feature_dist(on, feature2)
-          if next_d < min_next_d:
-            min_next_feature = feature2
-            min_next_d = next_d
-            min_next_feature_point = next_feature_point
-        last_points[shuffled_index] = min_next_feature_point
-        on = min_next_feature
-        shuffled.append(on)
-        feature_copy.remove(on)
+      min_next_feature = None
+      min_next_d = sys.maxint
+      min_next_feature_point = None
+      for feature2 in feature_copy:
+        if last_point:
+          next_feature_point, next_d = self._point_to_feature(
+              last_point, feature2)
+        else:
+          throw_away, next_feature_point, next_d = \
+              self._feature_to_feature_dist(on, feature2)
+        if next_d < min_next_d:
+          min_next_feature = feature2
+          min_next_d = next_d
+          min_next_feature_point = next_feature_point
+      on = min_next_feature
+      shuffled.append(on)
+      feature_copy.remove(on)
     return shuffled
 
-  def _sort_and_connect_features(self, shuffle=True):
+  def _sort_and_connect_features(self):
     """ You want to minimize the time moving the laser between features.
     This is basically traveling salesman, so just poke around for a while
     and take the best path we can find. Start with a sane feature ordering
@@ -530,10 +438,7 @@ class CTNCreator:
     best_features = self.features
     feature_count = len(self.features)
     for start_fresh in range(5):
-      if shuffle:
-        feature_copy = self._sane_feature_shuffle(self.features)
-      else:
-        feature_copy = list(self.features)
+      feature_copy = self._sane_feature_shuffle(self.features)
       current_d, current_connectors = self._total_laser_gap_dist(feature_copy)
       for delta in range(1, 5):
         for i in range(feature_count - delta):
@@ -677,9 +582,6 @@ class CTNFrame:
 
 def main():
   parser = OptionParser()
-  # TODO: Keep the concept of CTN files and Frames because those make sense.
-  # But don't support multiple input files. Nobody would ever use that without
-  # full support, and that's not worth building right now.
   parser.add_option(
       "-i", "--input", dest="input_file",
       help=("A png file. I'll draw a laser path along each border between "
@@ -698,54 +600,17 @@ def main():
             "Technically, this value says how many times to repeat each point "
             "when the laser is on."))
   parser.add_option(
-<<<<<<< HEAD
-      "-r", "--repeat_yourself", dest="repeat_yourself", default=2,
-      help=("How long should the laser linger at each point. Higher values "
-            "mean more accuracy but more flickering."))
-  # TODO: This should default to something that makes sense.
-  parser.add_option(
-      "-m", "--max_points", dest="max_points", default=0,
-      help=("How many points per CTN file should we allow? This setting "
-            "allows you to break complex designs up into multiple files so "
-            "the flickering on each file is bearable."))
-=======
       "-m", "--max_points", dest="max_points", default=0,
       help=("A CTN file is a list of points. The laser projector attempts to "
             "point the laser at each point in succession. Use this option to "
             "limit how many points may be in a CTN file before we start "
             "splitting the result across multiple files. This is essential for"
             "complex designs with many points."))
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
   (options, args) = parser.parse_args()
   output_prefix = options.output_file_prefix
   if output_prefix.lower().endswith(".ctn"):
     output_prefix = output_prefix[:-4]
 
-<<<<<<< HEAD
-  input_files = options.input_files.split(",")
-  max_points = options.max_points
-  if len(input_files) == 0:
-    raise Exception("I received no input files.")
-  elif len(input_files) > 1 and max_points:
-    raise Exception("Either specify more than one input file, or specify "
-                    "max_points. It doesn't make sense to specify both.")
-
-  if max_points:
-    ctnList = CTNList(max_points=max_points, input_file=input_files[0])
-  else:
-    ctn = CTN(repeat_yourself=int(options.repeat_yourself))
-
-    for input_file in :
-      if not input_file.lower().endswith(".png"):
-        raise Exception("This script only accepts .png files as input.")
-      ctn_frame = CTNFrame()
-      ctn_frame.load_from_png(input_file)
-      ctn.add_frame(ctn_frame)
-      if options.debug:
-        ctn_frame.write_debug(input_file[:-4] + "_debug.png")
-
-    ctn.write(output)
-=======
   ctn = CTN(repeat_yourself=int(options.repeat_yourself))
 
   for input_file in options.input_files.split(","):
@@ -758,7 +623,6 @@ def main():
       ctn_frame.write_debug(input_file[:-4] + "_debug.png")
 
   ctn.write(output_prefix)
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
 
 if __name__ == "__main__":
