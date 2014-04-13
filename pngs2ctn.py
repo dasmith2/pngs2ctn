@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 The CTN file format is really pretty simple. It's an array of frames. Each
 frame has some boilerplate, then a few values describing how many points there
 are and which frame this is and out of how many. Then it lists all the points.
@@ -21,28 +20,10 @@ Therefore, just in case anybody wants to make animations with this thing,
 TODO: Add a laser animation mode which interprets .pngs differently.
 I'm thinking this mode interprets black as the background, and any border
 between black and non-black becomes the non-black color.
-=======
-TODO: Get consistent about points vs coords.
-
-If you're here because you want to understand the CTN format for the blue
-unbranded programmable laser projector from China, skip down to the CTNWriter
-class. That's got everything you need to know.
-
-This script takes a png file and turns it into one or more .CTN files. Any edge
-between white and non-white in the .png will become a green laser line. This is
-perfect for paint-by-laser, and not very helpful at all for creating laser
-animations.
-
-Therefore, TODO: Add a laser animation mode eventually. Probably never. It
-should take a list of input files, each of which will become a frame in a
-single output CTN file. It should interpret .pngs differently. I'm thinking
-this mode interprets black as the background, and any border between black and
-non-black becomes the non-black color.
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
 Also, TODO: Figure out how color works, exactly.
 
-python pngs2ctn.py -i ball.png
+python pngs2ctn.py -i ball_up.png,ball_middle.png,ball_down.png,ball_middle.png -o bouncing_ball.CTN
 """
 from collections import namedtuple
 from math import ceil
@@ -73,7 +54,6 @@ MAX_IMAGE_DIMENSION = 1000
 Coord = namedtuple('Coord', ['x', 'y'])
 
 
-<<<<<<< HEAD
 class CNTList:
   """ A list of CTN files to support the max_points option. """
   def __init__(self, max_points, input_file):
@@ -87,41 +67,22 @@ class CNTList:
 
 class CTN:
   BOILER_PLATE = 'CRTN' + '\x00' * 20
-=======
-class CTNWriter:
-  """ Here it is. You want to understand the CTN format? This is the class for
-  you. The CTN file format is really pretty simple. It's an array of frames.
-  Each frame has some boilerplate, then a few values describing how many points
-  there are and which frame this is and out of how many. Then it lists all the
-  points.  Each point is 2 bytes for x, 2 bytes for y, and 4 bytes for color. x
-  goes up from left to right starting with 0x8000. In other words,
-  1000000000000000 is on the far left, 0000000000000000 is halfway, and
-  0111111111111111 is on the far right. y goes up from bottom to top starting
-  with 0x8000. Each point must be at least MAX_STEP_SIZE close to each other,
-  otherwise the laser projector will truncate your design as soon as it hits a
-  gap that's too big.
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
-  Finally there's a little boilerplate at the bottom.
+  def __init__(self, repeat_yourself=2):
+    self.repeat_yourself = repeat_yourself
+    self.frames = []
 
-  For my purposes, each CTN is only ever going to have 1 frame. But seeing as
-  this is the only documentation that exists on this file format, I'll write it
-  all out. """
-  BOILER_PLATE = 'CRTN' + '\x00' * 20 # Why cRtn? Beats me, team. Beats. Me.
-
-  def __init__(self, ctn):
-    self.ctn = ctn
+  def add_frame(self, ctn_frame):
+    self.frames.append(ctn_frame)
 
   def write(self, output_file_path):
     out = open(output_file_path, "w")
-    frame_count = self._2B_int(len(self.ctn.frames))
-    for frame_index, frame in enumerate(self.ctn.frames):
+    frame_count = self._2B_int(len(self.frames))
+    for frame_index, frame in enumerate(self.frames):
       point_array = bytearray()
       point_count = 0
-      last_point = None
       for feature in frame.features:
         for point in feature.points:
-<<<<<<< HEAD
           yes_color = feature.color > 0
           # No need to repeat for accuracy during the blank parts.
           for i in range(self.repeat_yourself if yes_color else 1):
@@ -134,25 +95,6 @@ class CTNWriter:
               point_array.extend('\x00\x00\x00\x08')
             else:
               point_array.extend('\x00\x00\x40\x00')
-=======
-          # Reminder: a point is a namedtuple (x, y) where x and y are between
-          # 0.0 and 1.0 inclusive.
-          if point_to_point(last_point, point) > MAX_STEP_SIZE:
-            raise Exception("This design is invalid because it has 2 points "
-                            "that are too far apart.")
-          last_point = point
-          point_count += 1
-          point_array.extend(self._2B_position(point.x))
-          # I'm used to y = 0 meaning the top so that's how I programmed it,
-          # but .CTNs put y = 0 at the bottom.
-          point_array.extend(self._2B_position(1.0 - point.y))
-          # TODO: I don't understand how color works exactly. I didn't need
-          # to and I got lazy.
-          if feature.color > 0:
-            point_array.extend('\x00\x00\x00\x08')
-          else:
-            point_array.extend('\x00\x00\x40\x00')
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
       self._write_frame_header(out, point_count, frame_index, frame_count)
       out.write(point_array)
     self._write_footer(out, frame_count)
@@ -166,8 +108,7 @@ class CTNWriter:
 
   def _2B_int(self, value):
     """ struct.pack('>I', value)[-2:] works too but it's slightly slower and
-    less clear. I "& 0x00FFFF" here because _2B_position causes an overflow bit
-    when value > .5. """
+    less clear. """
     return chr((value & 0x00FFFF) / 256) + chr(value % 256)
 
   def _write_frame_header(self, out, point_count, frame_index, frame_count):
@@ -240,21 +181,37 @@ class Go:
 Feature = namedtuple('Feature', ['color', 'points'])
 
 
-class CTN:
+class CTNFrame:
   def __init__(self):
-    # Again, I'm only ever going to put 1 frame in here. But in the interests
-    # of documenting the CTN format, here you go.
-    self.frames = []
+    self.features = []
 
-  def add_frame(self, ctn_frame):
-    self.frames.append(ctn_frame)
+  def write_debug(self, file_name):
+    debug_size = 750
+    debug = Image.new("1", (debug_size, debug_size))
+    draw = ImageDraw.Draw(debug)
+    for feature in self.features:
+      points = [self._draw_2_debug(c, debug_size) for c in feature.points]
+      for index, from_point in enumerate(points):
+        to_point = points[(index + 1) % len(points)]
+        fx = from_point.x
+        fy = from_point.y
+        if feature.color > 0:
+          draw.line((fx, fy, to_point.x, to_point.y), fill=1)
+        draw.line(self._valid_line(fx - 1, fy, fx + 1, fy, debug_size), fill=1)
+        draw.line(self._valid_line(fx, fy - 1, fx, fy + 1, debug_size), fill=1)
+    debug.save(open(file_name, "w"), "PNG")
 
+  def _valid_line(self, x1, y1, x2, y2, maximum_exclusive):
+    return self._closest_valid(x1, y1, maximum_exclusive) + self._closest_valid(x2, y2, maximum_exclusive)
 
-class PngFeatureFinder:
-  def __init__(self, input_file):
-    self.input_file = input_file
+  def _closest_valid(self, x, y, maximum_exclusive):
+    # Turns -1 into 0 and 500 into 499, but leaves 10 as 10.
+    maximum = maximum_exclusive - 1
+    return (min(maximum, max(0, x)), min(maximum, max(0, y)))
 
-<<<<<<< HEAD
+  def _draw_2_debug(self, coord, dimension):
+    return Coord(int(coord.x * dimension), int(coord.y * dimension))
+
   def load_features(self, input_file):
     self._load_png(input_file)
     self._find_features()
@@ -262,14 +219,9 @@ class PngFeatureFinder:
   def load_from_png(self, input_file):
     self.load_features(input_file)
     self._sort_and_connect_features()
-=======
-  def get_features(self):
-    self._load_png(input_file)
-    return self._find_features()
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
-  def _load_png(self):
-    self.image = Image.open(self.input_file)
+  def _load_png(self, input_file):
+    self.image = Image.open(input_file)
     self.image_width, self.image_height = self.image.size
     if self.image_width > MAX_IMAGE_DIMENSION or \
        self.image_height > MAX_IMAGE_DIMENSION:
@@ -279,7 +231,6 @@ class PngFeatureFinder:
     self.max_image_dimention = max(self.image.size)
 
   def _find_features(self):
-    features = []
     seen_border = Set()
     last_position = None
     for y in range(self.image_height):
@@ -289,193 +240,11 @@ class PngFeatureFinder:
           seen_pixels, draw_coords = self._compute_feature(at)
           for pixel in seen_pixels:
             seen_border.add(pixel)
-          features.append(Feature(255, draw_coords))
-    return features
+          self.features.append(Feature(255, draw_coords))
 
-  def _is_border(self, at):
-    if self._is_white(at):
-      return False
-    for check in Go.adjacent_4(at):
-      if not self._is_valid(check) or self._is_white(check):
-        return True
-    return False
-
-  def _is_white(self, at):
-    # A pixel can have 3 or 4 values depending on whether there's an alpha
-    # chanel. 255 is pure white, but use 250 for a helpful fudge factor. The
-    # Gimp or whatever is always leaving ALMOST white pixels all over the
-    # place.
-    return all([chanel > 250 for chanel in self.image.getpixel(at)])
-
-  def _is_valid(self, at):
-    return at.x >= 0 and at.x < self.image_width and at.y >= 0 \
-           and at.y < self.image_height
-
-  def _pixel_to_draw(self, at):
-    return Coord(
-        at.x * 1.0 / self.max_image_dimention,
-        at.y * 1.0 / self.max_image_dimention)
-
-  def _compute_feature(self, at):
-    """ Walk around the outside of a non-white blob. Pretend you have your back
-    to the feature, and outward keeps track of which direction your face is
-    pointed. Keep moving to your right, adding points until you go all the way
-    around to where you're about to draw the same point again. """
-    for go in Go.directions:
-      looking_at = Go.next(at, go)
-      if not self._is_valid(looking_at) or self._is_white(looking_at):
-        outward = go
-        break
-    draw_coords = [] # The coords the laser projector should draw.
-    seen_pixels = set() # The actual pixels on the outside of this feature.
-    while True:
-      seen_pixels.add(at)
-
-      # If we're on the bottom of a feature, you don't want to draw a point at
-      # the top of the pixel.
-      draw_x, draw_y = at.x, at.y
-      if outward in (Go.DOWN_RIGHT, Go.DOWN, Go.DOWN_LEFT):
-        draw_y += 1
-      if outward in (Go.UP_RIGHT, Go.RIGHT, Go.DOWN_RIGHT):
-        draw_x += 1
-      next_draw_coord = self._pixel_to_draw(Coord(draw_x, draw_y))
-      # If we started on a pointy bit, when we come back around to the very
-      # first pixel it'll get a second draw_coord. Hence, we often will not
-      # notice we're repeating unless we also pay attention to the second
-      # pixel. Hence, this 2 here.
-      if next_draw_coord in draw_coords[:2]:
-        break
-      draw_coords.append(next_draw_coord)
-
-      # We're looking outward. Rotate to the right until we see the next
-      # non-white pixel. That will be the next one to our right.
-      for go_offset in range(len(Go.directions)):
-        looking_around = (outward + go_offset) % len(Go.directions)
-        looking_at = Go.next(at, looking_around)
-        if self._is_valid(looking_at) and not self._is_white(looking_at):
-          # To compute the new outward, look back where we came from, and
-          # rotate once to the right.
-          looking_back = Go.direction_from_to(looking_at, at)
-          outward = (looking_back + 1) % len(Go.directions)
-          at = looking_at
-          break
-    return seen_pixels, draw_coords
-
-
-class DebugFrameDrawer:
-  @classmethod
-  def draw_debug(cls, frame, output_file_name):
-    debug_size = 750
-    debug = Image.new("1", (debug_size, debug_size))
-    draw = ImageDraw.Draw(debug)
-    for feature in cls.features:
-      points = [cls._draw_2_debug(c, debug_size) for c in feature.points]
-      for index, from_point in enumerate(points):
-        to_point = points[(index + 1) % len(points)]
-        fx = from_point.x
-        fy = from_point.y
-        if feature.color > 0:
-          draw.line((fx, fy, to_point.x, to_point.y), fill=1)
-        draw.line(cls._valid_line(fx - 1, fy, fx + 1, fy, debug_size), fill=1)
-        draw.line(cls._valid_line(fx, fy - 1, fx, fy + 1, debug_size), fill=1)
-    debug.save(open(output_file_name, "w"), "PNG")
-
-  @classmethod
-  def _draw_2_debug(cls, coord, dimension):
-    return Coord(int(coord.x * dimension), int(coord.y * dimension))
-
-  @classmethod
-  def _valid_line(cls, x1, y1, x2, y2, maximum_exclusive):
-    return cls._closest_valid(x1, y1, maximum_exclusive) + \
-           cls._closest_valid(x2, y2, maximum_exclusive)
-
-  @classmethod
-  def _closest_valid(cls, x, y, maximum_exclusive):
-    maximum = maximum_exclusive - 1
-    return (min(maximum, max(0, x)), min(maximum, max(0, y)))
-
-
-
-class CTNCreator:
-  """ Here's where we take our beautiful abstract list of features and turn
-  them into gritty CTN files that work OK in real life. """
-
-<<<<<<< HEAD
   def _sane_feature_shuffle(self, feature_list):
     return self.shuffle_features_multiple_lists(
         feature_list, ouput_list_count=1)[0]
-=======
-  def get_CTNs(self, features, repeat_yourself, max_points):
-    for index, feature in features:
-      features[index] = self._spread_out_draw_coords(feature)
-    # Don't bother repeating points where the laser is off. Accuracy only
-    # matters when the laser is on.
-    for index, feature in features:
-      features[index] = self._repeat_feature(feature, repeat_yourself)
-
-    big_ctns = []
-    for feature in features:
-      if len(feature.points) > max_points:
-        big_ctns.append(self._ctn_from_features([feature]))
-        features.remove(feature)
-
-    ctnCount = 1
-    ctns = self._get_CTN_helper(features, ctnCount)
-    while self._too_many_points(ctns):
-      ctnCount += 1
-      ctns = self._get_CTN_helper(features, ctnCount)
-    return big_ctns + ctns
-
-  def _get_CTN_helper(self, features, ctnCount):
-    pass
-
-  def _too_many_points(self, ctns):
-    pass
-
-  def _ctn_from_features(self, features):
-    pass
-
-  def _repeat_feature(self, feature, repeat_yourself):
-    new_coords = []
-    for coord in feature.points:
-      for i in range(repeat_yourself):
-        new_coords.append(coord)
-    return Feature(feature.color, new_coords)
-
-  class _FeatureList:
-    def __init__(self, first_feature):
-      self.features = []
-      self.point_count = 0
-      self.last_point = None
-      self.addFeature(first_feature)
-
-    def addFeature(self, feature):
-      self.features.append(feature)
-      self.point_count += len(feature.points)
-
-  def _greedy_feature_list_builder(self, features, list_count):
-    if len(features) <= list_count:
-      return [[f] for f in features]
-
-    feature_copy = list(features)
-    feature_lists = []
-    list_of_counts = []
-    for i in range(list_count):
-      random_feature = feature_copy[random.randint(0, len(feature_copy) - 1)]
-      feature_copy.remove(random_feature)
-      list_of_feature_lists.append(self._FeatureList(random_feature))
-
-    while len(feature_copy) > 0:
-      # In terms of python code readability, list comprehensions are the worst
-      # thing that ever happened to me.
-      shortest = sorted([f.point_count, f for f in feature_lists])[0][1]
-
-  def _sane_feature_shuffle(self, features):
-    feature_copy = list(features)
-    on = feature_copy[random.randint(0, len(feature_copy) - 1)]
-    shuffled = []
-    last_point = None
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
   def shuffle_features_multiple_lists(self, feature_list, ouput_list_count):
     feature_copy = list(feature_list)
@@ -617,30 +386,75 @@ class CTNCreator:
         min_d = next_d
     return min_fpoint, min_d
 
-  def _points_from_to(self, frm, to):
-    d = self._point_to_point(frm, to)
-    if d <= MAX_STEP_SIZE:
-      return [frm, to]
-    step_count = int(ceil(d / MAX_STEP_SIZE))
-    to_return = []
-    for step_i in range(self._to_int(step_count)):
-      to_return.append(Coord(
-          frm.x + 1.0 * step_i * (to.x - frm.x) / step_count,
-          frm.y + 1.0 * step_i * (to.y - frm.y) / step_count))
-    last_d = self._point_to_point(to, to_return[-1])
-    return to_return
+  def _is_border(self, at):
+    if self._is_white(at):
+      return False
+    for check in Go.adjacent_4(at):
+      if not self._is_valid(check) or self._is_white(check):
+        return True
+    return False
 
-  def _to_int(self, flt):
-    # Hacky. Whatever.
-    return int(flt + 1e-5)
+  def _is_white(self, at):
+    # A pixel can have 3 or 4 values depending on whether there's an alpha
+    # chanel.
+    return all([chanel == 255 for chanel in self.image.getpixel(at)])
 
-  def _point_to_point(self, frm, to):
-    # See? Basic high school math. IT'S IMPORTANT!
-    return ((to.x - frm.x) ** 2 + (to.y - frm.y) ** 2) ** .5
+  def _is_valid(self, at):
+    return at.x >= 0 and at.x < self.image_width and at.y >= 0 \
+           and at.y < self.image_height
 
-  def _spread_out_draw_coords(self, feature):
+  def _pixel_to_draw(self, at):
+    return Coord(
+        at.x * 1.0 / self.max_image_dimention,
+        at.y * 1.0 / self.max_image_dimention)
+
+  def _compute_feature(self, at):
+    """ Walk around the outside of a non-white blob. Pretend you have your back
+    to the feature, and outward keeps track of which direction your face is
+    pointed. Keep moving to your right, adding points until you go all the way
+    around to where you're about to draw the same point again. """
+    for go in Go.directions:
+      looking_at = Go.next(at, go)
+      if not self._is_valid(looking_at) or self._is_white(looking_at):
+        outward = go
+        break
+    draw_coords = [] # The coords the laser projector should draw.
+    seen_pixels = set() # The actual pixels on the outside of this feature.
+    while True:
+      seen_pixels.add(at)
+
+      # If we're on the bottom of a feature, you don't want to draw a point at
+      # the top of the pixel.
+      draw_x, draw_y = at.x, at.y
+      if outward in (Go.DOWN_RIGHT, Go.DOWN, Go.DOWN_LEFT):
+        draw_y += 1
+      if outward in (Go.UP_RIGHT, Go.RIGHT, Go.DOWN_RIGHT):
+        draw_x += 1
+      next_draw_coord = self._pixel_to_draw(Coord(draw_x, draw_y))
+      # If we started on a pointy bit, when we come back around to the very
+      # first pixel it'll get a second draw_coord. Hence, we often will not
+      # notice we're repeating unless we also pay attention to the second
+      # pixel. Hence, this 2 here.
+      if next_draw_coord in draw_coords[:2]:
+        break
+      draw_coords.append(next_draw_coord)
+
+      # We're looking outward. Rotate to the right until we see the next
+      # non-white pixel. That will be the next one to our right.
+      for go_offset in range(len(Go.directions)):
+        looking_around = (outward + go_offset) % len(Go.directions)
+        looking_at = Go.next(at, looking_around)
+        if self._is_valid(looking_at) and not self._is_white(looking_at):
+          # To compute the new outward, look back where we came from, and
+          # rotate once to the right.
+          looking_back = Go.direction_from_to(looking_at, at)
+          outward = (looking_back + 1) % len(Go.directions)
+          at = looking_at
+          break
+    return seen_pixels, self._spread_out_draw_coords(draw_coords)
+
+  def _spread_out_draw_coords(self, draw_coords):
     i = 0
-    draw_coords = feature.points
     return_draw_coords = []
     while i < len(draw_coords):
       frm = draw_coords[i]
@@ -666,13 +480,48 @@ class CTNCreator:
           if i + to_offset < len(draw_coords):
             d = self._point_to_point(frm, draw_coords[i + to_offset])
         i = i + to_offset - 1 # Went too far, so back up 1.
-    return Feature(feature.color, return_draw_coords)
+    return return_draw_coords
 
+  def _points_from_to(self, frm, to):
+    d = self._point_to_point(frm, to)
+    if d <= MAX_STEP_SIZE:
+      return [frm, to]
+    step_count = int(ceil(d / MAX_STEP_SIZE))
+    to_return = []
+    for step_i in range(self._to_int(step_count)):
+      to_return.append(Coord(
+          frm.x + 1.0 * step_i * (to.x - frm.x) / step_count,
+          frm.y + 1.0 * step_i * (to.y - frm.y) / step_count))
+    last_d = self._point_to_point(to, to_return[-1])
+    return to_return
 
-class CTNFrame:
-  def __init__(self, features):
-    self.features = features
+  def _to_int(self, flt):
+    # Hacky. Whatever.
+    return int(flt + 1e-5)
 
+  def _point_to_point(self, frm, to):
+    # See? Basic high school math. That shit is important!
+    return ((to.x - frm.x) ** 2 + (to.y - frm.y) ** 2) ** .5
+
+  def get_bytes(self):
+    bytes = bytearray()
+    self._append_header(bytes)
+    self._append_body(bytes)
+    return bytes
+
+  def _append_header(self, bytes):
+    pass
+
+  def _append_body(self, bytes):
+    for point in points:
+      self._append_double_byte(bytes, point.x)
+      self._append_double_byte(bytes, point.y)
+      self._append_double_byte(0)
+      self._append_double_byte(bytes, point.color)
+
+  def _append_double_byte(self, bytes, my_int):
+    bytes.append(my_int / 256)
+    bytes.append(my_int % 256)
 
 
 def main():
@@ -681,24 +530,16 @@ def main():
   # But don't support multiple input files. Nobody would ever use that without
   # full support, and that's not worth building right now.
   parser.add_option(
-      "-i", "--input", dest="input_file",
-      help=("A png file. I'll draw a laser path along each border between "
-            "white and nonwhite. So for example, a solid black disk will "
-            "become a circle around the circumference of the disk."))
+      "-i", "--input", dest="input_files",
+      help=("A comma delimited list of png files, each of which will become a "
+            "single frame in the ctn"))
   parser.add_option(
-      "-o", "--output_file_prefix", dest="output_file_prefix",
-      help="Each output CTN file will get this prefix.")
+      "-o", "--output", dest="output_file",
+      help="The output .CTN file.")
   parser.add_option(
       "-d", "--debug", action="store_true", dest="debug", default=False,
-      help="Output a debug .png file for every generated CTN file.")
+      help="Output a debug .png file for every input file.")
   parser.add_option(
-      "-r", "--repeat_yourself", dest="repeat_yourself", default=3,
-      help=("How long should the laser linger as it draws? Higher values "
-            "mean more accuracy but more flickering from a slower laser. "
-            "Technically, this value says how many times to repeat each point "
-            "when the laser is on."))
-  parser.add_option(
-<<<<<<< HEAD
       "-r", "--repeat_yourself", dest="repeat_yourself", default=2,
       help=("How long should the laser linger at each point. Higher values "
             "mean more accuracy but more flickering."))
@@ -708,20 +549,11 @@ def main():
       help=("How many points per CTN file should we allow? This setting "
             "allows you to break complex designs up into multiple files so "
             "the flickering on each file is bearable."))
-=======
-      "-m", "--max_points", dest="max_points", default=0,
-      help=("A CTN file is a list of points. The laser projector attempts to "
-            "point the laser at each point in succession. Use this option to "
-            "limit how many points may be in a CTN file before we start "
-            "splitting the result across multiple files. This is essential for"
-            "complex designs with many points."))
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
   (options, args) = parser.parse_args()
-  output_prefix = options.output_file_prefix
-  if output_prefix.lower().endswith(".ctn"):
-    output_prefix = output_prefix[:-4]
+  output = options.output_file
+  if not output.lower().endswith(".ctn"):
+    output += ".CTN"
 
-<<<<<<< HEAD
   input_files = options.input_files.split(",")
   max_points = options.max_points
   if len(input_files) == 0:
@@ -745,20 +577,6 @@ def main():
         ctn_frame.write_debug(input_file[:-4] + "_debug.png")
 
     ctn.write(output)
-=======
-  ctn = CTN(repeat_yourself=int(options.repeat_yourself))
-
-  for input_file in options.input_files.split(","):
-    if not input_file.lower().endswith(".png"):
-      raise Exception("This script only accepts .png files as input.")
-    ctn_frame = CTNFrame()
-    ctn_frame.load_from_png(input_file)
-    ctn.add_frame(ctn_frame)
-    if options.debug:
-      ctn_frame.write_debug(input_file[:-4] + "_debug.png")
-
-  ctn.write(output_prefix)
->>>>>>> f7cf128689e69d5e597eb3965bf89950d6462e34
 
 
 if __name__ == "__main__":
