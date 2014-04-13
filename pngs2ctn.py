@@ -16,7 +16,8 @@ a single .CTN file. Any edge between white and non-white in the .png will
 become a green laser line. This is perfect for paint-by-laser, and not very
 helpful at all for creating laser animations.
 
-Therefore, TODO: Add a laser animation mode which interprets .pngs differently.
+Therefore, just in case anybody wants to make animations with this thing,
+TODO: Add a laser animation mode which interprets .pngs differently.
 I'm thinking this mode interprets black as the background, and any border
 between black and non-black becomes the non-black color.
 
@@ -33,7 +34,7 @@ from sets import Set
 import sys
 
 
-random.seed("There's no love like your love.")
+random.seed("I believe in a fing called love.")
 
 
 """ TODO: I'm calculating the distance between a and b as cartesian, a.k.a.
@@ -51,6 +52,17 @@ MAX_IMAGE_DIMENSION = 1000
 
 
 Coord = namedtuple('Coord', ['x', 'y'])
+
+
+class CNTList:
+  """ A list of CTN files to support the max_points option. """
+  def __init__(self, max_points, input_file):
+    next_ctn_count = 1
+    last_points = sys.maxint
+    ctn_frame = CTNFrame()
+    ctn_frame.load_features(input_file)
+    while last_points > max_points:
+      frames = [CTNFrame() for i in range(next_ctn_count)]
 
 
 class CTN:
@@ -200,9 +212,12 @@ class CTNFrame:
   def _draw_2_debug(self, coord, dimension):
     return Coord(int(coord.x * dimension), int(coord.y * dimension))
 
-  def load_from_png(self, input_file):
+  def load_features(self, input_file):
     self._load_png(input_file)
     self._find_features()
+
+  def load_from_png(self, input_file):
+    self.load_features(input_file)
     self._sort_and_connect_features()
 
   def _load_png(self, input_file):
@@ -227,36 +242,45 @@ class CTNFrame:
             seen_border.add(pixel)
           self.features.append(Feature(255, draw_coords))
 
-  def _sane_feature_shuffle(self, feature_copy):
-    feature_copy = list(feature_copy)
-    on = feature_copy[random.randint(0, len(feature_copy) - 1)]
-    shuffled = []
-    last_point = None
+  def _sane_feature_shuffle(self, feature_list):
+    return self.shuffle_features_multiple_lists(
+        feature_list, ouput_list_count=1)[0]
 
-    shuffled.append(on)
-    feature_copy.remove(on)
+  def shuffle_features_multiple_lists(self, feature_list, ouput_list_count):
+    feature_copy = list(feature_list)
+    shuffleds = [[] for i in range(ouput_list_count)]
 
-    while len(feature_copy) > 0:
-      min_next_feature = None
-      min_next_d = sys.maxint
-      min_next_feature_point = None
-      for feature2 in feature_copy:
-        if last_point:
-          next_feature_point, next_d = self._point_to_feature(
-              last_point, feature2)
-        else:
-          throw_away, next_feature_point, next_d = \
-              self._feature_to_feature_dist(on, feature2)
-        if next_d < min_next_d:
-          min_next_feature = feature2
-          min_next_d = next_d
-          min_next_feature_point = next_feature_point
-      on = min_next_feature
+    for shuffled in shuffleds:
+      on = feature_copy[random.randint(0, len(feature_copy) - 1)]
       shuffled.append(on)
       feature_copy.remove(on)
+    last_points = [None for shuffled in shuffleds]
+
+    while len(feature_copy) > 0:
+      # TODO: This is wrong. It should add a feature to whichever list has the
+      # least points, not whichever list has the least features.
+      for shuffled_index, shuffled in enumerate(shuffleds):
+        min_next_feature = None
+        min_next_d = sys.maxint
+        min_next_feature_point = None
+        for feature2 in feature_copy:
+          if last_points[shuffled_index]:
+            next_feature_point, next_d = self._point_to_feature(
+                last_points[shuffled_index], feature2)
+          else:
+            throw_away, next_feature_point, next_d = \
+                self._feature_to_feature_dist(on, feature2)
+          if next_d < min_next_d:
+            min_next_feature = feature2
+            min_next_d = next_d
+            min_next_feature_point = next_feature_point
+        last_points[shuffled_index] = min_next_feature_point
+        on = min_next_feature
+        shuffled.append(on)
+        feature_copy.remove(on)
     return shuffled
 
-  def _sort_and_connect_features(self):
+  def _sort_and_connect_features(self, shuffle=True):
     """ You want to minimize the time moving the laser between features.
     This is basically traveling salesman, so just poke around for a while
     and take the best path we can find. Start with a sane feature ordering
@@ -275,7 +299,10 @@ class CTNFrame:
     best_features = self.features
     feature_count = len(self.features)
     for start_fresh in range(5):
-      feature_copy = self._sane_feature_shuffle(self.features)
+      if shuffle:
+        feature_copy = self._sane_feature_shuffle(self.features)
+      else:
+        feature_copy = list(self.features)
       current_d, current_connectors = self._total_laser_gap_dist(feature_copy)
       for delta in range(1, 5):
         for i in range(feature_count - delta):
@@ -499,6 +526,9 @@ class CTNFrame:
 
 def main():
   parser = OptionParser()
+  # TODO: Keep the concept of CTN files and Frames because those make sense.
+  # But don't support multiple input files. Nobody would ever use that without
+  # full support, and that's not worth building right now.
   parser.add_option(
       "-i", "--input", dest="input_files",
       help=("A comma delimited list of png files, each of which will become a "
@@ -513,23 +543,40 @@ def main():
       "-r", "--repeat_yourself", dest="repeat_yourself", default=2,
       help=("How long should the laser linger at each point. Higher values "
             "mean more accuracy but more flickering."))
+  # TODO: This should default to something that makes sense.
+  parser.add_option(
+      "-m", "--max_points", dest="max_points", default=0,
+      help=("How many points per CTN file should we allow? This setting "
+            "allows you to break complex designs up into multiple files so "
+            "the flickering on each file is bearable."))
   (options, args) = parser.parse_args()
   output = options.output_file
   if not output.lower().endswith(".ctn"):
     output += ".CTN"
 
-  ctn = CTN(repeat_yourself=int(options.repeat_yourself))
+  input_files = options.input_files.split(",")
+  max_points = options.max_points
+  if len(input_files) == 0:
+    raise Exception("I received no input files.")
+  elif len(input_files) > 1 and max_points:
+    raise Exception("Either specify more than one input file, or specify "
+                    "max_points. It doesn't make sense to specify both.")
 
-  for input_file in options.input_files.split(","):
-    if not input_file.lower().endswith(".png"):
-      raise Exception("This script only accepts .png files as input.")
-    ctn_frame = CTNFrame()
-    ctn_frame.load_from_png(input_file)
-    ctn.add_frame(ctn_frame)
-    if options.debug:
-      ctn_frame.write_debug(input_file[:-4] + "_debug.png")
+  if max_points:
+    ctnList = CTNList(max_points=max_points, input_file=input_files[0])
+  else:
+    ctn = CTN(repeat_yourself=int(options.repeat_yourself))
 
-  ctn.write(output)
+    for input_file in :
+      if not input_file.lower().endswith(".png"):
+        raise Exception("This script only accepts .png files as input.")
+      ctn_frame = CTNFrame()
+      ctn_frame.load_from_png(input_file)
+      ctn.add_frame(ctn_frame)
+      if options.debug:
+        ctn_frame.write_debug(input_file[:-4] + "_debug.png")
+
+    ctn.write(output)
 
 
 if __name__ == "__main__":
