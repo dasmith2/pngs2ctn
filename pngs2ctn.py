@@ -23,7 +23,11 @@ python png2ctn.py -i ball.png
 from collections import namedtuple
 from math import ceil
 from optparse import OptionParser
-from PIL import Image, ImageDraw
+# PIL! On one default install you're PIL, on another you're Image. Get it together man.
+try:
+  from PIL import Image, ImageDraw
+except ImportError:
+  import Image, ImageDraw
 import random
 from sets import Set
 import sys
