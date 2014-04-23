@@ -31,6 +31,7 @@ import sys
 random.seed("I believe in a fing called love.")
 
 
+# TODO: Figure out what this actually is. This works fine for now though.
 MAX_STEP_SIZE = 5.0 / 500.0
 
 
@@ -66,14 +67,18 @@ class CTNWriter:
       point_array = bytearray()
       point_count = 0
       last_point = None
-      for path in frame.laserPaths:
+      for path in frame.paths:
         for point in path.get_points(repeat_points):
           # Reminder: a point is a namedtuple (x, y) where x and y are between
           # 0.0 and 1.0 inclusive.
-          if point_to_point(last_point, point) > MAX_STEP_SIZE:
-            raise Exception(
-                "This design is invalid because it has 2 points that are too "
-                "far apart. The projector will truncate it.")
+          if last_point:
+            distance = Distance.point_2_point(last_point, point)
+            if distance > MAX_STEP_SIZE:
+              raise Exception((
+                  "This design is invalid because it has 2 points that are %s "
+                  "far apart. They can be at most %s apart before the "
+                  "projector truncates the design.") % (
+                      distance, MAX_STEP_SIZE))
           last_point = point
           point_count += 1
           point_array.extend(self._2B_position(point.x))
@@ -127,7 +132,7 @@ class LaserPath:
 class Connector(LaserPath):
   def __init__(self, from_point, to_point):
     self.from_point = from_point
-    self.to_point = self.to_point
+    self.to_point = to_point
 
   def laser_on(self):
     return False
@@ -137,10 +142,10 @@ class Connector(LaserPath):
     return int(ceil((distance + 1e-5) / MAX_STEP_SIZE))
 
   def get_points(self, repeat_points=1):
-    point_count = self.point_count(self.from_point, self.to_point)
-    to_return = []
     # Don't bother repeating points where the laser is off. Accuracy only
     # matters when the laser is on.
+    point_count = self.point_count()
+    to_return = []
     for point_i in range(point_count):
       frm_x = self.from_point.x
       frm_y = self.from_point.y
@@ -366,6 +371,12 @@ class Distance:
     return min_f1point, min_f2point, min_d
 
 
+CTN = namedtuple('CTN', ['frames'])
+
+
+CTNFrame = namedtuple('CTNFrame', ['paths'])
+
+
 class CTNCreator:
   """ Here's where we take our beautiful abstract list of features and turn
   them into gritty CTN files that work OK in real life. """
@@ -403,7 +414,8 @@ class CTNCreator:
   class _PathList:
     def __init__(self, first_feature, repeat_points):
       self.features = [first_feature]
-      self.point_count = feature.point_count(repeat_points)
+      self.connectors = []
+      self.point_count = first_feature.point_count(repeat_points)
       self.last_point = None
       # Are there ANY features left that won't put us over the limit?
       self.some_left = True
@@ -454,8 +466,8 @@ class CTNCreator:
 
       shortest = available[0]
       min_next_feature = None
+      min_next_connector = None
       min_next_d = sys.maxint
-      min_next_connection_point
       for feature2 in features_copy:
         if shortest.last_point:
           last_feature_point = shortest.last_point
@@ -473,10 +485,12 @@ class CTNCreator:
           min_next_connector = connector
           min_next_feature = feature2
       if min_next_feature:
-        shortest.add_feature(min_connector, min_next_feature, repeat_points)
-        feature_copy.remove(min_next_feature)
+        shortest.add_feature(
+            min_next_connector, min_next_feature, repeat_points)
+        features_copy.remove(min_next_feature)
       else:
         shortest.some_left = False
+    return path_lists
 
   def _worst_distance(self, path_lists):
     return max([fl.point_count for fl in path_lists])
@@ -513,13 +527,7 @@ class CTNCreator:
     return Feature(return_draw_points)
 
 
-CTN = namedtuple('CTN', ['frames'])
-
-
-CTNFrame = namedtuple('CTNFrame', ['paths'])
-
-
-class FrameDebuger:
+class FrameDebugger:
   def draw_debug(self, frame, output_file_name):
     debug_size = 750
     debug = Image.new("1", (debug_size, debug_size))
@@ -587,11 +595,12 @@ def main():
   ctns = CTNCreator().get_CTNs(
       features, options.repeat_points, options.max_points)
   for index, ctn in enumerate(ctns):
-    CTNWriter().write(ctn, "%s_%s.CTN" % (options.output_file_prefix, index + 1))
+    file_name = "%s_%s.CTN" % (options.output_file_prefix, index + 1)
+    CTNWriter().write(ctn, file_name, options.repeat_points)
     if options.debug:
       # Again, for my purposes, there's only ever going to be one frame.
       for frame_index, frame in enumerate(ctn.frames):
-        args = (options.output_prefix, index + 1, frame_index + 1)
+        args = (options.output_file_prefix, index + 1, frame_index + 1)
         FrameDebugger().draw_debug(frame, "%s_%s_%s_debug.png" % args)
 
 
