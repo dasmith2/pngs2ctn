@@ -19,8 +19,6 @@ Optimization ideas:
   and add the one with the shortest laser off path to any valid feature list.
 * Try to start the salesmen far apart.
 * Yes, bubble sort the feature lists.
-* Judge the different lists not on worst point count, but total laser off
-  points.
 """
 from collections import namedtuple
 from math import ceil
@@ -400,15 +398,15 @@ class CTNCreator:
     list_count = 1
     try_with_each_count = 3
     min_path_lists = None
-    min_worst_distance = sys.maxint
+    min_total_distance = sys.maxint
     while not min_path_lists:
       for i in range(try_with_each_count):
         path_lists = self._greedy_path_list_builder(
             features, list_count, repeat_points, max_points)
         if path_lists:
-          worst_distance = self._worst_distance(path_lists)
-          if min_path_lists == None or worst_distance < min_worst_distance:
-            min_worst_distance = worst_distance
+          distance = self._total_distance(path_lists)
+          if min_path_lists == None or distance < min_total_distance:
+            min_total_distance = distance
             min_path_lists = path_lists
       list_count += 1
 
@@ -424,8 +422,6 @@ class CTNCreator:
       self.connectors = []
       self.point_count = first_feature.point_count(repeat_points)
       self.last_point = None
-      # Are there ANY features left that won't put us over the limit?
-      self.some_left = True
 
     def add_feature(self, connector, feature, repeat_points):
       self.connectors.append(connector)
@@ -451,13 +447,6 @@ class CTNCreator:
 
   def _greedy_path_list_builder(
       self, features, list_count, repeat_points, max_points):
-    """ Make list_count _PathLists, each started with a random feature.
-    Take the _PathList with the least points, a.k.a. the shortest, and
-    add to it the next feature with the shortest gap whose addition won't put
-    the _PathList over the limit. In other words I'm trying to grow the
-    _PathLists as evenly as I can while also trying to minimize the time
-    the laser spends between features. It's a traveling salesmen problem with
-    multiple salesmen 'solved' with a greedy algorithm. """
     features_copy = list(features)
     path_lists = []
     for i in range(list_count):
@@ -466,41 +455,37 @@ class CTNCreator:
       path_lists.append(self._PathList(random_feature, repeat_points))
 
     while len(features_copy) > 0:
-      available = [f for f in path_lists if f.some_left]
-      if not available:
-        return None
-      available.sort(lambda x, y: x.point_count - y.point_count)
-
-      shortest = available[0]
+      min_next_d = sys.maxint
       min_next_feature = None
       min_next_connector = None
-      min_next_d = sys.maxint
+      min_next_path_list = None
       for feature2 in features_copy:
-        if shortest.last_point:
-          last_feature_point = shortest.last_point
-          next_feature_point, next_d = Distance.point_2_feature(
-              last_feature_point, feature2)
-        else:
-          last_feature_point, next_feature_point, next_d = \
-              Distance.feature_2_feature(shortest.features[-1], feature2)
-        connector = Connector(last_feature_point, next_feature_point)
-        next_d = connector.point_count(repeat_points)
-        more_points = next_d + feature2.point_count(repeat_points)
-        under_max = shortest.point_count + more_points <= max_points
-        if next_d < min_next_d and under_max:
-          min_next_d = next_d
-          min_next_connector = connector
-          min_next_feature = feature2
-      if min_next_feature:
-        shortest.add_feature(
-            min_next_connector, min_next_feature, repeat_points)
-        features_copy.remove(min_next_feature)
-      else:
-        shortest.some_left = False
+        for path_list in path_lists:
+          if path_list.last_point:
+            last_feature_point = path_list.last_point
+            next_feature_point, next_d = Distance.point_2_feature(
+                last_feature_point, feature2)
+          else:
+            last_feature_point, next_feature_point, next_d = \
+                Distance.feature_2_feature(path_list.features[-1], feature2)
+          connector = Connector(last_feature_point, next_feature_point)
+          next_d = connector.point_count(repeat_points)
+          more_points = next_d + feature2.point_count(repeat_points)
+          under_max = path_list.point_count + more_points <= max_points
+          if next_d < min_next_d and under_max:
+            min_next_d = next_d
+            min_next_feature = feature2
+            min_next_connector = connector
+            min_next_path_list = path_list
+      if not min_next_feature:
+        return
+      min_next_path_list.add_feature(
+          min_next_connector, min_next_feature, repeat_points)
+      features_copy.remove(min_next_feature)
     return path_lists
 
-  def _worst_distance(self, path_lists):
-    return max([fl.point_count for fl in path_lists])
+  def _total_distance(self, path_lists):
+    return sum([fl.point_count for fl in path_lists])
 
   def _spread_out_draw_points(self, feature):
     i = 0
