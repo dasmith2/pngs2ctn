@@ -13,12 +13,19 @@ non-black becomes the non-black color.
 TODO: Figure out how this projector does color, exactly.
 
 python png2ctn.py -i ball.png
+
+Optimization ideas:
+* Who cares if the salesmen share the features fairly. Go through the features
+  and add the one with the shortest laser off path to any valid feature list.
+* Try to start the salesmen far apart.
+* Yes, bubble sort the feature lists.
+* Judge the different lists not on worst point count, but total laser off
+  points.
 """
 from collections import namedtuple
 from math import ceil
 from optparse import OptionParser
-# PIL! On one default install you're PIL, on another you're Image.
-# Get it together man.
+# Depending on whether you've got PIL or pillow.
 try:
   from PIL import Image, ImageDraw
 except ImportError:
