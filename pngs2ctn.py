@@ -1,8 +1,4 @@
 """
-If you're here because you want to understand the CTN format for the blue
-unbranded programmable laser projector from China, skip down to the CTNWriter
-class. That's got everything you need to know.
-
 This script takes a png file and turns it into one or more .CTN files. Any edge
 between white and non-white in the .png will become a green laser line. This is
 perfect for paint-by-laser, and not very helpful at all for creating laser
@@ -16,14 +12,13 @@ non-black becomes the non-black color.
 
 TODO: Figure out how this projector does color, exactly.
 
-TODO: Optimize each salesman's route with a modified bubble sort.
-
 python png2ctn.py -i ball.png
 """
 from collections import namedtuple
 from math import ceil
 from optparse import OptionParser
-# PIL! On one default install you're PIL, on another you're Image. Get it together man.
+# PIL! On one default install you're PIL, on another you're Image.
+# Get it together man.
 try:
   from PIL import Image, ImageDraw
 except ImportError:
@@ -37,6 +32,10 @@ random.seed("I believe in a fing called love.")
 
 
 MAX_STEP_SIZE = 5.0 / 500.0
+
+
+# Shrink images down to this size first. That saves a lot of work.
+MAX_IMAGE_SIZE = 1000
 
 
 class CTNWriter:
@@ -67,8 +66,8 @@ class CTNWriter:
       point_array = bytearray()
       point_count = 0
       last_point = None
-      for feature in frame.features:
-        for point in feature.get_points(repeat_points):
+      for path in frame.laserPaths:
+        for point in path.get_points(repeat_points):
           # Reminder: a point is a namedtuple (x, y) where x and y are between
           # 0.0 and 1.0 inclusive.
           if point_to_point(last_point, point) > MAX_STEP_SIZE:
@@ -83,7 +82,7 @@ class CTNWriter:
           point_array.extend(self._2B_position(1.0 - point.y))
           # I don't understand how color works exactly. I didn't need to and I
           # got lazy.
-          if feature.laser_on():
+          if path.laser_on():
             point_array.extend('\x00\x00\x00\x08')
           else:
             point_array.extend('\x00\x00\x40\x00')
@@ -101,7 +100,7 @@ class CTNWriter:
   def _2B_int(self, value):
     """ struct.pack('>I', value)[-2:] works too but it's slightly slower and
     less clear. I "& 0x00FFFF" here because _2B_position causes an overflow bit
-    when value > .5. """
+    half the time. """
     return chr((value & 0x00FFFF) / 256) + chr(value % 256)
 
   def _write_frame_header(self, out, point_count, frame_index, frame_count):
@@ -126,35 +125,46 @@ class LaserPath:
 
 
 class Connector(LaserPath):
-  def __init__(self, from_point, self.to_point):
-    self.frm = from_point
-    self.to = self.to_point
-
-  def point_count(self, repeat_points=1):
-    distance = Distance.point_2_point(self.frm, self.to)
-    return int(ceil((distance + 1e-5) / MAX_STEP_SIZE))
-
-  def get_points(self, repeat_points=1):
-    step_count = self.point_count(self.frm, self.to)
-    self.to_return = []
-    # Don't bother repeating points where the laser is off. Accuracy only
-    # matters when the laser is on.
-    for step_i in range(step_count):
-      self.to_return.append(Point(
-          self.frm.x + 1.0 * step_i * (self.to.x - self.frm.x) / step_count,
-          self.frm.y + 1.0 * step_i * (self.to.y - self.frm.y) / step_count))
-    return self.to_return
+  def __init__(self, from_point, to_point):
+    self.from_point = from_point
+    self.to_point = self.to_point
 
   def laser_on(self):
     return False
 
+  def point_count(self, repeat_points=1):
+    distance = Distance.point_2_point(self.from_point, self.to_point)
+    return int(ceil((distance + 1e-5) / MAX_STEP_SIZE))
+
+  def get_points(self, repeat_points=1):
+    point_count = self.point_count(self.from_point, self.to_point)
+    to_return = []
+    # Don't bother repeating points where the laser is off. Accuracy only
+    # matters when the laser is on.
+    for point_i in range(point_count):
+      frm_x = self.from_point.x
+      frm_y = self.from_point.y
+      to_return.append(Point(
+          frm_x + 1.0 * point_i * (self.to_point.x - frm_x) / point_count,
+          frm_y + 1.0 * point_i * (self.to_point.y - frm_y) / point_count))
+    return to_return
+
 
 class Feature(LaserPath):
-  def __init__(cls, points):
+  def __init__(self, points):
     self.points = points
+
+  def laser_on(self):
+    return True
 
   def point_count(self, repeat_points=1):
     return len(self.points) * repeat_points
+
+  def rotate_to(self, starting_point):
+    """ We have to rotate the points depending on where the connectors
+    connect so the laser path remains valid. """
+    index = self.points.index(starting_point)
+    self.points = self.points[index:] + self.points[:index]
 
   def get_points(self, repeat_points=1):
     # chain(*izip(*[self.points for i in range(repeat_points)]))
@@ -167,9 +177,6 @@ class Feature(LaserPath):
         for i in range(repeat_points):
           new_points.append(point)
       return new_points
-
-  def laser_on(self):
-    return True
 
 
 class Go:
@@ -226,17 +233,17 @@ class Go:
 
 
 class PngFeatureFinder:
-  def __init__(self, input_file):
-    self.input_file = input_file
-
-  def get_features(self):
-    self._load_png(input_file)
-    return self._find_features()
-
-  def _load_png(self):
-    self.image = Image.open(self.input_file)
+  def get_features(self, input_file):
+    self.image = Image.open(input_file)
     self.image_width, self.image_height = self.image.size
     self.max_image_dimention = max(self.image.size)
+    if self.max_image_dimention > MAX_IMAGE_SIZE:
+      ratio = 1.0 * MAX_IMAGE_SIZE / self.max_image_dimention
+      self.image_width = int(ratio * self.image_width)
+      self.image_height = int(ratio * self.image_height)
+      self.max_image_dimention = int(ratio * self.max_image_dimention)
+      self.image = self.image.resize((self.image_width, self.image_height))
+    return self._find_features()
 
   def _find_features(self):
     features = []
@@ -363,37 +370,37 @@ class CTNCreator:
   """ Here's where we take our beautiful abstract list of features and turn
   them into gritty CTN files that work OK in real life. """
   def get_CTNs(self, features, repeat_points, max_points):
-    for index, feature in features:
-      features[index] = self._spread_out_draw_points(feature)
+    for index in range(len(features)):
+      features[index] = self._spread_out_draw_points(features[index])
 
     big_ctns = []
     for feature in features:
       if feature.point_count(repeat_points) > max_points:
-        big_ctns.append(self._ctn_from_features([feature], repeat_points))
+        big_ctns.append(self._ctn_from_paths([feature]))
         features.remove(feature)
 
     list_count = 1
     try_with_each_count = 3
-    min_feature_lists = None
+    min_path_lists = None
     min_worst_distance = sys.maxint
-    while not min_feature_lists:
+    while not min_path_lists:
       for i in range(try_with_each_count):
-        feature_lists = self._greedy_feature_list_builder(
+        path_lists = self._greedy_path_list_builder(
             features, list_count, repeat_points, max_points)
-        if feature_lists:
-          worst_distance = self._worst_distance(feature_lists)
-          if min_feature_lists == None or worst_distance < min_worst_distance:
+        if path_lists:
+          worst_distance = self._worst_distance(path_lists)
+          if min_path_lists == None or worst_distance < min_worst_distance:
             min_worst_distance = worst_distance
-            min_feature_lists = feature_lists
+            min_path_lists = path_lists
       list_count += 1
 
-    ctns = [self._ctn_from_features(fl, repeat_points) for fl in feature_lists]
+    ctns = [self._ctn_from_paths(pl.get_paths()) for pl in min_path_lists]
     return big_ctns + ctns
 
-  def _ctn_from_features(self, features):
-    return CTN([CTNFrame(features)])
+  def _ctn_from_paths(self, paths):
+    return CTN([CTNFrame(paths)])
 
-  class _FeatureList:
+  class _PathList:
     def __init__(self, first_feature, repeat_points):
       self.features = [first_feature]
       self.point_count = feature.point_count(repeat_points)
@@ -402,30 +409,45 @@ class CTNCreator:
       self.some_left = True
 
     def add_feature(self, connector, feature, repeat_points):
-      self.features.append(connector)
+      self.connectors.append(connector)
       self.features.append(feature)
       self.point_count += connector.point_count(repeat_points) + \
                           feature.point_count(repeat_points)
       self.last_point = connector.to_point
 
-  def _greedy_feature_list_builder(
+    def get_paths(self):
+      if len(self.features) == 1:
+        return self.features
+      paths = []
+      for index, connector in enumerate(self.connectors):
+        feature_before = self.features[index]
+        feature_before.rotate_to(connector.from_point)
+        paths.append(feature_before)
+        paths.append(connector)
+      last_feature = self.features[-1]
+      last_connector = self.connectors[-1]
+      last_feature.rotate_to(last_connector.to_point)
+      paths.append(last_feature)
+      return paths
+
+  def _greedy_path_list_builder(
       self, features, list_count, repeat_points, max_points):
-    """ Make list_count _FeatureLists, each started with a random feature.
-    Take the _FeatureList with the least points, a.k.a. the shortest, and
+    """ Make list_count _PathLists, each started with a random feature.
+    Take the _PathList with the least points, a.k.a. the shortest, and
     add to it the next feature with the shortest gap whose addition won't put
-    the _FeatureList over the limit. In other words I'm trying to grow the
-    _FeatureLists as evenly as I can while also trying to minimize the time
+    the _PathList over the limit. In other words I'm trying to grow the
+    _PathLists as evenly as I can while also trying to minimize the time
     the laser spends between features. It's a traveling salesmen problem with
     multiple salesmen 'solved' with a greedy algorithm. """
     features_copy = list(features)
-    feature_lists = []
+    path_lists = []
     for i in range(list_count):
       random_feature = random.choice(features_copy)
       features_copy.remove(random_feature)
-      feature_lists.append(self._FeatureList(random_feature))
+      path_lists.append(self._PathList(random_feature, repeat_points))
 
     while len(features_copy) > 0:
-      available = [f for f in feature_lists if f.some_left]
+      available = [f for f in path_lists if f.some_left]
       if not available:
         return None
       available.sort(lambda x, y: x.point_count - y.point_count)
@@ -456,8 +478,8 @@ class CTNCreator:
       else:
         shortest.some_left = False
 
-  def _worst_distance(self, feature_lists):
-    return max([fl.point_count for fl in feature_lists])
+  def _worst_distance(self, path_lists):
+    return max([fl.point_count for fl in path_lists])
 
   def _spread_out_draw_points(self, feature):
     i = 0
@@ -475,14 +497,15 @@ class CTNCreator:
         i += 1
       else:
         while d < MAX_STEP_SIZE:
-          if i + to_offset == len(draw_points):
+          at_the_end = i + to_offset == len(draw_points)
+          if at_the_end:
             # We need to connect the circle, so to speak. The laser has to be
             # able to trace all the way around this feature because we may
             # choose to start drawing this feature anywhere in the middle.
             if Distance.point_2_point(frm, draw_points[0]) > MAX_STEP_SIZE:
               # a.k.a. i + to_offset - 1, a.k.a. len(draw_points) - 1
               return_draw_points.append(draw_points[-1])
-            return return_draw_points
+            return Feature(return_draw_points)
           to_offset += 1
           if i + to_offset < len(draw_points):
             d = Distance.point_2_point(frm, draw_points[i + to_offset])
@@ -493,38 +516,34 @@ class CTNCreator:
 CTN = namedtuple('CTN', ['frames'])
 
 
-CTNFrame = namedtuple('CTNFrame', ['features'])
+CTNFrame = namedtuple('CTNFrame', ['paths'])
 
 
 class FrameDebuger:
-  @classmethod
-  def draw_debug(cls, frame, output_file_name):
+  def draw_debug(self, frame, output_file_name):
     debug_size = 750
     debug = Image.new("1", (debug_size, debug_size))
     draw = ImageDraw.Draw(debug)
-    for feature in cls.features:
-      points = [cls._draw_2_debug(c, debug_size) for c in feature.get_points(1)]
+    for path in frame.paths:
+      points = [self._draw_2_debug(c, debug_size) for c in path.get_points(1)]
       for index, from_point in enumerate(points):
         to_point = points[(index + 1) % len(points)]
         fx = from_point.x
         fy = from_point.y
-        if feature.laser_on():
+        if path.laser_on():
           draw.line((fx, fy, to_point.x, to_point.y), fill=1)
-        draw.line(cls._valid_line(fx - 1, fy, fx + 1, fy, debug_size), fill=1)
-        draw.line(cls._valid_line(fx, fy - 1, fx, fy + 1, debug_size), fill=1)
+        draw.line(self._valid_line(fx - 1, fy, fx + 1, fy, debug_size), fill=1)
+        draw.line(self._valid_line(fx, fy - 1, fx, fy + 1, debug_size), fill=1)
     debug.save(open(output_file_name, "w"), "PNG")
 
-  @classmethod
-  def _draw_2_debug(cls, point, dimension):
+  def _draw_2_debug(self, point, dimension):
     return Point(int(point.x * dimension), int(point.y * dimension))
 
-  @classmethod
-  def _valid_line(cls, x1, y1, x2, y2, maximum_exclusive):
-    return cls._closest_valid(x1, y1, maximum_exclusive) + \
-           cls._closest_valid(x2, y2, maximum_exclusive)
+  def _valid_line(self, x1, y1, x2, y2, maximum_exclusive):
+    return self._closest_valid(x1, y1, maximum_exclusive) + \
+           self._closest_valid(x2, y2, maximum_exclusive)
 
-  @classmethod
-  def _closest_valid(cls, x, y, maximum_exclusive):
+  def _closest_valid(self, x, y, maximum_exclusive):
     maximum = maximum_exclusive - 1
     return (min(maximum, max(0, x)), min(maximum, max(0, y)))
 
@@ -538,6 +557,7 @@ def main():
             "become a circle around the circumference of the disk."))
   parser.add_option(
       "-o", "--output_file_prefix", dest="output_file_prefix",
+      default="output",
       help="Each output CTN file will get this prefix.")
   parser.add_option(
       "-d", "--debug", action="store_true", dest="debug", default=False,
@@ -558,17 +578,21 @@ def main():
             "only handle so many points before it flickers so much it's "
             "unusable."))
   (options, args) = parser.parse_args()
-  output_prefix = options.output_file_prefix
-  if output_prefix.lower().endswith(".ctn"):
-    output_prefix = output_prefix[:-4]
 
   input_file = options.input_file
   if not input_file.lower().endswith(".png"):
     raise Exception("This script only accepts .png files as input.")
 
-  if options.debug:
-
-  ctn.write(output_prefix)
+  features = PngFeatureFinder().get_features(input_file)
+  ctns = CTNCreator().get_CTNs(
+      features, options.repeat_points, options.max_points)
+  for index, ctn in enumerate(ctns):
+    CTNWriter().write(ctn, "%s_%s.CTN" % (options.output_file_prefix, index + 1))
+    if options.debug:
+      # Again, for my purposes, there's only ever going to be one frame.
+      for frame_index, frame in enumerate(ctn.frames):
+        args = (options.output_prefix, index + 1, frame_index + 1)
+        FrameDebugger().draw_debug(frame, "%s_%s_%s_debug.png" % args)
 
 
 if __name__ == "__main__":
