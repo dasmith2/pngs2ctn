@@ -14,11 +14,15 @@ TODO: Figure out how this projector does color, exactly.
 
 python png2ctn.py -i ball.png
 
-Optimization ideas:
-* Who cares if the salesmen share the features fairly. Go through the features
-  and add the one with the shortest laser off path to any valid feature list.
-* Try to start the salesmen far apart.
-* Yes, bubble sort the feature lists.
+Quality ideas:
+* Forget this repeat_points concept. Instead, take smaller steps when the laser
+  is on. We can capture more of the feature this way. Currently it skips points
+  in the middle and then repeats points around it, which kind of makes no
+  sense.
+* If we want to get really fancy, the laser can go fast when it's moving in a
+  straight line. It's when we're changing direction that it runs into trouble.
+  So space out the points according to how quickly the laser is changing
+  direction.
 """
 from collections import namedtuple
 from math import ceil
