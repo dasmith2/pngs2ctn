@@ -150,7 +150,22 @@ class LaserPath:
   pass
 
 
-class Connector(LaserPath):
+class PointsAlongLineBuilder:
+  def point_count_along_line(self, frm, to, step_size):
+    distance = Distance.point_2_point(frm, to)
+    return int(ceil((distance + 1e-5) / step_size))
+
+  def get_points_along_line(self, frm, to, step_size):
+    point_count = self.point_count_along_line(frm, to, step_size)
+    to_return = []
+    for point_i in range(point_count):
+      to_return.append(Point(
+          frm.x + 1.0 * point_i * (to.x - frm.x) / point_count,
+          frm.y + 1.0 * point_i * (to.y - frm.y) / point_count))
+    return to_return
+
+
+class Connector(LaserPath, PointsAlongLineBuilder):
   def __init__(self, from_point, to_point):
     self.from_point = from_point
     self.to_point = to_point
@@ -159,11 +174,14 @@ class Connector(LaserPath):
     return False
 
   def point_count(self, linger=DEFAULT_LINGER):
-    distance = Distance.point_2_point(self.from_point, self.to_point)
-    return linger - 1 + int(ceil((distance + 1e-5) / MAX_LASER_OFF_STEP_SIZE))
+    return linger * 2 + self._point_count_helper()
+
+  def _point_count_helper(self):
+    return self.point_count_along_line(
+        self.from_point, self.to_point, MAX_LASER_OFF_STEP_SIZE)
 
   def get_points(self, linger=DEFAULT_LINGER):
-    point_count = self.point_count()
+    point_count = self._point_count_helper()
     to_return = [self.from_point for x in range(linger)]
     for point_i in range(point_count):
       frm_x = self.from_point.x
@@ -391,10 +409,10 @@ CTN = namedtuple('CTN', ['frames'])
 CTNFrame = namedtuple('CTNFrame', ['paths'])
 
 
-class CTNCreator:
+class CTNCreator(PointsAlongLineBuilder):
   """ Here's where we take our beautiful abstract list of features and turn
   them into gritty CTN files that work OK in real life. """
-  def get_CTNs(self, features, linger, max_points):
+  def get_CTNs(self, features, linger, max_points, file_count):
     for index in range(len(features)):
       features[index] = self._spread_out_draw_points(features[index])
 
@@ -404,7 +422,7 @@ class CTNCreator:
         big_ctns.append(self._ctn_from_paths([feature]))
         features.remove(feature)
 
-    list_count = 1
+    list_count = file_count
     min_path_lists = None
     min_total_distance = sys.maxint
     while not min_path_lists:
@@ -507,7 +525,9 @@ class CTNCreator:
       d = Distance.point_2_point(frm, to)
       if d >= MAX_LASER_ON_STEP_SIZE:
         if d > MAX_LASER_ON_STEP_SIZE:
-          return_draw_points.extend(self._points_from_to(frm, to))
+          line_points = self.get_points_along_line(
+              frm, to, MAX_LASER_ON_STEP_SIZE)
+          return_draw_points.extend(line_points)
         i += 1
       else:
         while d < MAX_LASER_ON_STEP_SIZE:
@@ -585,6 +605,8 @@ def main():
             "or a connector? This feature is helpful because the lasers "
             "take a certain amount of time to switch on and off, so this cuts "
             "down on confusing lasers being on or off in weird places."))
+  parser.add_option(
+      "-n", "--minimum_number", dest="file_count", default=1)
   (options, args) = parser.parse_args()
 
   input_file = options.input_file
@@ -593,7 +615,7 @@ def main():
 
   features = PngFeatureFinder().get_features(input_file)
   ctns = CTNCreator().get_CTNs(
-      features, options.linger, options.max_points)
+      features, int(options.linger), int(options.max_points), int(options.file_count))
   for index, ctn in enumerate(ctns):
     file_name = "%s_%s.CTN" % (options.output_file_prefix, index + 1)
     CTNWriter().write(ctn, file_name, options.linger)
