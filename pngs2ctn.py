@@ -4,28 +4,42 @@ between white and non-white in the .png will become a green laser line. This is
 perfect for paint-by-laser, and not very helpful at all for creating laser
 animations.
 
-Therefore, TODO: Add a laser animation mode eventually. Probably never. It
-should take a list of input files, each of which will become a frame in a
-single output CTN file. It should interpret .pngs differently. I'm thinking
-this mode interprets black as the background, and any border between black and
-non-black becomes the non-black color.
+The projector also requires a .LST file which lists the CTN files. This is much
+simpler. List each file followed with ,30,5 and a windows line break including
+the last line. So for example,
 
-TODO: Figure out how this projector does color, exactly.
+first.CTN,30,5
+second.CTN,30,5
 
-python png2ctn.py -i ball.png
+This .LST file must be placed in a single folder along with all the .CTN files
+it references on a FAT32 formatted SD card. Here is an example file structure
+on said card:
 
-Quality ideas:
-* Forget this repeat_points concept. Instead, take smaller steps when the laser
-  is on. We can capture more of the feature this way. Currently it skips points
-  in the middle and then repeats points around it, which kind of makes no
-  sense.
+any_folder_name/
+  any_list_name.LST
+  first.CTN
+  second.CTN
+
+Example usage:
+python png2ctn.py -i ball.png -o output_prefix -d
+
+TODOs:
+* This thing takes forever with even a pretty reasonable number of features.
+  It's all in the greedy algorithm. I should speed that way up.
+* It seems that sometimes you get micro features, a single pixel or something.
+  This is probably an issue with PngFeatureFinder. It's obnoxious because that's
+  a lot of wasted laser time jumping between noisy points.
 * If we want to get really fancy, the laser can go fast when it's moving in a
   straight line. It's when we're changing direction that it runs into trouble.
   So space out the points according to how quickly the laser is changing
   direction.
-
-Optimization ideas:
-* Do tie it back around. That will tend to clump them together more.
+* Do tie it back around. That will tend to clump them together more. 
+* Figure out how this projector does color, exactly.
+* Add a laser animation mode eventually. Probably never. It
+should take a list of input files, each of which will become a frame in a
+single output CTN file. It should interpret .pngs differently. I'm thinking
+this mode interprets black as the background, and any border between black and
+non-black becomes the non-black color.
 """
 from collections import namedtuple
 from math import ceil
