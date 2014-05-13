@@ -81,7 +81,7 @@ class CTNWriter:
   BOILER_PLATE = 'CRTN' + '\x00' * 20
 
   def write(self, ctn, output_file_path, linger):
-    out = open(output_file_path, "w")
+    out = open(output_file_path, "wb")
     frame_count = self._2B_int(len(ctn.frames))
     max_in_a_row = 0
     for frame_index, frame in enumerate(ctn.frames):
