@@ -44,6 +44,7 @@ non-black becomes the non-black color.
 from collections import namedtuple
 from math import ceil
 from optparse import OptionParser
+import os
 # Depending on whether you've got PIL or pillow.
 try:
   from PIL import Image, ImageDraw
@@ -596,11 +597,14 @@ def main():
       "-i", "--input", dest="input_file",
       help=("A png file. I'll draw a laser path along each border between "
             "white and nonwhite. So for example, a solid black disk will "
-            "become a circle around the circumference of the disk."))
+            "become a circle around the circumference of the disk. You can "
+            "also specify a directory and I'll run against every .png in "
+            "the directory."))
   parser.add_option(
       "-o", "--output_file_prefix", dest="output_file_prefix",
-      default="output",
-      help="Each output CTN file will get this prefix.")
+      default="",
+      help=("Each output CTN file will get this prefix. By default this will "
+            "use the same prefix as the input file."))
   parser.add_option(
       "-d", "--debug", action="store_true", dest="debug", default=False,
       help="Output a debug .png file for every generated CTN file.")
@@ -624,20 +628,28 @@ def main():
   (options, args) = parser.parse_args()
 
   input_file = options.input_file
-  if not input_file.lower().endswith(".png"):
+  if os.path.isdir(input_file):
+    files = os.listdir(input_file)
+    input_files = [f for f in files if f.lower().endswith(".png")]
+  elif not input_file.lower().endswith(".png"):
     raise Exception("This script only accepts .png files as input.")
+  else:
+    input_files = [input_file]
+  
+  for input_file in input_files:
+    prefix = options.output_file_prefix or input_file[:-4]
 
-  features = PngFeatureFinder().get_features(input_file)
-  ctns = CTNCreator().get_CTNs(
-      features, int(options.linger), int(options.max_points), int(options.file_count))
-  for index, ctn in enumerate(ctns):
-    file_name = "%s_%s.CTN" % (options.output_file_prefix, index + 1)
-    CTNWriter().write(ctn, file_name, options.linger)
-    if options.debug:
-      # Again, for my purposes, there's only ever going to be one frame.
-      for frame_index, frame in enumerate(ctn.frames):
-        args = (options.output_file_prefix, index + 1, frame_index + 1)
-        FrameDebugger().draw_debug(frame, "%s_%s_%s_debug.png" % args)
+    features = PngFeatureFinder().get_features(input_file)
+    ctns = CTNCreator().get_CTNs(
+        features, int(options.linger), int(options.max_points), int(options.file_count))
+    for index, ctn in enumerate(ctns):
+      file_name = "%s_%s.CTN" % (prefix, index + 1)
+      CTNWriter().write(ctn, file_name, options.linger)
+      if options.debug:
+        # Again, for my purposes, there's only ever going to be one frame.
+        for frame_index, frame in enumerate(ctn.frames):
+          args = (prefix, index + 1, frame_index + 1)
+          FrameDebugger().draw_debug(frame, "%s_%s_%s_debug.png" % args)
 
 
 if __name__ == "__main__":
