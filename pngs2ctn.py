@@ -436,6 +436,8 @@ class CTNCreator(PointsAlongLineBuilder):
       if feature.point_count(linger) > max_points:
         big_ctns.append(self._ctn_from_paths([feature]))
         features.remove(feature)
+    if not features:
+      return big_ctns
 
     list_count = file_count
     min_path_lists = None
