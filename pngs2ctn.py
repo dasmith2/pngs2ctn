@@ -432,12 +432,13 @@ class CTNCreator(PointsAlongLineBuilder):
       features[index] = self._spread_out_draw_points(features[index])
 
     big_ctns = []
-    for feature in features:
-      if feature.point_count(linger) > max_points:
-        big_ctns.append(self._ctn_from_paths([feature]))
-        features.remove(feature)
-    if not features:
-      return big_ctns
+    if max_points > 0:
+      for feature in features:
+        if feature.point_count(linger) > max_points:
+          big_ctns.append(self._ctn_from_paths([feature]))
+          features.remove(feature)
+      if not features:
+        return big_ctns
 
     list_count = file_count
     min_path_lists = None
@@ -515,7 +516,7 @@ class CTNCreator(PointsAlongLineBuilder):
           next_d = connector.point_count(linger)
           more_points = next_d + feature2.point_count(linger)
           under_max = path_list.point_count + more_points <= max_points
-          if next_d < min_next_d and under_max:
+          if next_d < min_next_d and (under_max or max_points == 0):
             min_next_d = next_d
             min_next_feature = feature2
             min_next_connector = connector
@@ -630,14 +631,16 @@ def main():
   (options, args) = parser.parse_args()
 
   input_file = options.input_file
-  if os.path.isdir(input_file):
+  if not input_file:
+    raise Exception("You need to specify an input file or folder.")
+  elif os.path.isdir(input_file):
     files = os.listdir(input_file)
     input_files = [f for f in files if f.lower().endswith(".png")]
   elif not input_file.lower().endswith(".png"):
     raise Exception("This script only accepts .png files as input.")
   else:
     input_files = [input_file]
-  
+
   for input_file in input_files:
     prefix = options.output_file_prefix or input_file[:-4]
 
