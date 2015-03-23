@@ -619,7 +619,8 @@ def main():
             "splitting the result across multiple files. This is essential for "
             "complex designs with many points. This blue laser projector can "
             "only handle so many points before it flickers so much it's "
-            "unusable."))
+            "unusable. Passing a value of 0 means putting them all in the "
+            "same file."))
   parser.add_option(
       "-l", "--linger", dest="linger", default=DEFAULT_LINGER,
       help=("How long should the laser hang out at the begining of a feature "
